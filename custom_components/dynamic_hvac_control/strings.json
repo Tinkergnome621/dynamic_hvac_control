@@ -1,0 +1,183 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Dynamic HVAC Control Setup",
+        "description": "Connect your physical thermostat, optional blower fan, remote temperature helper, and presence tracker.\n\n💡 Pro Tip: If using a Home Assistant Average (Min/Max) Helper, include your wall thermostat's built-in temperature sensor in that helper. Because the wall unit is hardwired to 24V power, your average helper will remain online even if battery-powered room sensors drop offline.",
+        "data": {
+          "name": "Integration Name",
+          "target_climate": "Physical Thermostat (e.g. Meross)",
+          "temperature_sensor": "Remote Temperature Sensor (e.g. house temp helper)",
+          "humidity_sensor": "Indoor Humidity Sensor (Optional)",
+          "fan_entity": "Blower Fan Entity (Optional, e.g. Matter fan)",
+          "presence_sensor": "Presence Sensor / Person (Optional)",
+          "return_temp_sensor": "Return Air / Input Temperature (Optional)",
+          "return_humidity_sensor": "Return Air / Input Humidity (Optional)",
+          "supply_temp_sensor": "Supply Air / Output Plenum Temperature (Optional)",
+          "supply_humidity_sensor": "Supply Air / Output Plenum Humidity (Optional)"
+        }
+      },
+      "presets": {
+        "title": "Setpoints, Swings & Offsets",
+        "description": "Configure your default temperatures, swings, offsets, and vacation hold targets.",
+        "data": {
+          "cooling_swing": "Cooling Swing (°F)",
+          "heating_swing": "Heating Swing (°F)",
+          "cooling_offset": "Cooling Dynamic Offset (°F - default: 3.0)",
+          "heating_offset": "Heating Dynamic Offset (°F - default: 1.0 for Heat Pump Aux protection)",
+          "min_cycle_duration": "Minimum Compressor Cycle Time (Minutes - default: 5)",
+          "errand_delay": "Errand Grace Delay (Minutes before Away)",
+          "immunity_duration": "Pre-Cooling Away Immunity (Minutes)",
+          "comfort_cool": "Comfort (Cool) °F",
+          "comfort_heat": "Comfort (Heat) °F",
+          "eco_cool": "Eco (Cool) °F",
+          "eco_heat": "Eco (Heat) °F",
+          "away_cool": "Away (Cool) °F",
+          "away_heat": "Away (Heat) °F",
+          "sleep_cool": "Sleep (Cool) °F",
+          "sleep_heat": "Sleep (Heat) °F",
+          "boost_cool": "Boost (Cool) °F",
+          "boost_heat": "Boost (Heat) °F",
+          "vacation_cool": "Vacation (Cool) °F",
+          "vacation_heat": "Vacation (Heat) °F"
+        }
+      },
+      "schedules": {
+        "title": "4-Slot Daily Schedules",
+        "description": "Configure the 4 scheduled time slots for Monday–Friday and Saturday–Sunday.",
+        "data": {
+          "enable_schedule": "Enable Built-In Schedules",
+          "wd_p1_time": "Weekday Period 1 Time (Wake)",
+          "wd_p1_preset": "Weekday Period 1 Preset",
+          "wd_p2_time": "Weekday Period 2 Time (Day/Work)",
+          "wd_p2_preset": "Weekday Period 2 Preset",
+          "wd_p3_time": "Weekday Period 3 Time (Evening/Return)",
+          "wd_p3_preset": "Weekday Period 3 Preset",
+          "wd_p4_time": "Weekday Period 4 Time (Night/Sleep)",
+          "wd_p4_preset": "Weekday Period 4 Preset",
+          "we_p1_time": "Weekend Period 1 Time (Wake)",
+          "we_p1_preset": "Weekend Period 1 Preset",
+          "we_p2_time": "Weekend Period 2 Time (Day)",
+          "we_p2_preset": "Weekend Period 2 Preset",
+          "we_p3_time": "Weekend Period 3 Time (Evening)",
+          "we_p3_preset": "Weekend Period 3 Preset",
+          "we_p4_time": "Weekend Period 4 Time (Night/Sleep)",
+          "we_p4_preset": "Weekend Period 4 Preset"
+        }
+      },
+      "notifications": {
+        "title": "Notification Triggers",
+        "description": "Choose which events trigger notifications and optionally specify a notification service (e.g. notify.notify or notify.mobile_app_phone).",
+        "data": {
+          "notify_service": "Notification Service (default: notify.persistent_notification)",
+          "notify_hvac_mode": "Notify on HVAC Mode Change (Cool / Heat / Off)",
+          "notify_preset": "Notify on Preset Change (Comfort, Eco, Away, Sleep, Boost, Vacation)",
+          "notify_schedule": "Notify on Scheduled Slot Transitions",
+          "notify_presence": "Notify on Presence / Errand Changes (Away / Return)",
+          "notify_sensor_fallback": "Notify on Sensor Fallback & Emergency Alerts"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Dynamic HVAC Control Settings",
+        "menu_options": {
+          "temperatures": "Temperature Presets, Swings & Offsets",
+          "sensors": "Sensors, Fan & Air Plenum Probes",
+          "weekday_schedule": "Monday – Friday Schedule (4 Slots)",
+          "weekend_schedule": "Saturday – Sunday Schedule (4 Slots)",
+          "presence_timers": "Errand Grace Delay & Away Immunity",
+          "notifications": "Notification Triggers & Alerts"
+        }
+      },
+      "sensors": {
+        "title": "Sensors, Fan & Air Plenum Probes",
+        "description": "Configure or update your room temperature and humidity sensors, blower fan, and supply/return duct probes.",
+        "data": {
+          "temperature_sensor": "Remote Temperature Sensor (e.g. house temp helper)",
+          "humidity_sensor": "Indoor Humidity Sensor (Optional)",
+          "fan_entity": "Blower Fan Entity (Optional, e.g. Matter fan)",
+          "presence_sensor": "Presence Sensor / Person (Optional)",
+          "return_temp_sensor": "Return Air / Input Temperature (Optional)",
+          "return_humidity_sensor": "Return Air / Input Humidity (Optional)",
+          "supply_temp_sensor": "Supply Air / Output Plenum Temperature (Optional)",
+          "supply_humidity_sensor": "Supply Air / Output Plenum Humidity (Optional)"
+        }
+      },
+      "temperatures": {
+        "title": "Temperature Presets, Swings & Offsets",
+        "description": "Adjust your setpoints, hysteresis swings, offsets, or vacation temperatures.",
+        "data": {
+          "cooling_swing": "Cooling Swing (°F)",
+          "heating_swing": "Heating Swing (°F)",
+          "cooling_offset": "Cooling Dynamic Offset (°F)",
+          "heating_offset": "Heating Dynamic Offset (°F)",
+          "comfort_cool": "Comfort (Cool) °F",
+          "comfort_heat": "Comfort (Heat) °F",
+          "eco_cool": "Eco (Cool) °F",
+          "eco_heat": "Eco (Heat) °F",
+          "away_cool": "Away (Cool) °F",
+          "away_heat": "Away (Heat) °F",
+          "sleep_cool": "Sleep (Cool) °F",
+          "sleep_heat": "Sleep (Heat) °F",
+          "boost_cool": "Boost (Cool) °F",
+          "boost_heat": "Boost (Heat) °F",
+          "vacation_cool": "Vacation (Cool) °F",
+          "vacation_heat": "Vacation (Heat) °F"
+        }
+      },
+      "weekday_schedule": {
+        "title": "Monday – Friday Schedule",
+        "description": "Set the times and presets for your 4 weekday periods.",
+        "data": {
+          "enable_schedule": "Enable Built-In Schedules",
+          "wd_p1_time": "Period 1 Time (Morning/Wake)",
+          "wd_p1_preset": "Period 1 Preset",
+          "wd_p2_time": "Period 2 Time (Day/Work)",
+          "wd_p2_preset": "Period 2 Preset",
+          "wd_p3_time": "Period 3 Time (Evening/Pre-Cool)",
+          "wd_p3_preset": "Period 3 Preset",
+          "wd_p4_time": "Period 4 Time (Night/Sleep)",
+          "wd_p4_preset": "Period 4 Preset"
+        }
+      },
+      "weekend_schedule": {
+        "title": "Saturday – Sunday Schedule",
+        "description": "Set the times and presets for your 4 weekend periods.",
+        "data": {
+          "we_p1_time": "Period 1 Time (Morning/Wake)",
+          "we_p1_preset": "Period 1 Preset",
+          "we_p2_time": "Period 2 Time (Day)",
+          "we_p2_preset": "Period 2 Preset",
+          "we_p3_time": "Period 3 Time (Evening)",
+          "we_p3_preset": "Period 3 Preset",
+          "we_p4_time": "Period 4 Time (Night/Sleep)",
+          "we_p4_preset": "Period 4 Preset"
+        }
+      },
+      "presence_timers": {
+        "title": "Presence, Timers & Safety",
+        "description": "Adjust the errand grace period, pre-cooling away immunity, and compressor cycle protection.",
+        "data": {
+          "errand_delay": "Errand Grace Delay (Minutes before Away)",
+          "immunity_duration": "Pre-Cooling Away Immunity (Minutes)",
+          "min_cycle_duration": "Minimum Compressor Cycle Time (Minutes)"
+        }
+      },
+      "notifications": {
+        "title": "Notification Triggers & Alerts",
+        "description": "Configure which system events trigger notifications. Leave notification service blank or set to notify.persistent_notification to display alerts in Home Assistant.",
+        "data": {
+          "notify_service": "Notification Service (e.g. notify.notify, notify.mobile_app_phone)",
+          "notify_hvac_mode": "Notify on HVAC Mode Change (Cool / Heat / Off)",
+          "notify_preset": "Notify on Preset Change (Comfort, Eco, Away, Sleep, Boost, Vacation)",
+          "notify_schedule": "Notify on Scheduled Slot Transitions",
+          "notify_presence": "Notify on Presence / Errand Changes (Away / Return)",
+          "notify_sensor_fallback": "Notify on Sensor Fallback & Emergency Alerts"
+        }
+      }
+    }
+  }
+}
