@@ -1,6 +1,7 @@
 """Constants for the Dynamic HVAC Control integration."""
 
 DOMAIN = "dynamic_hvac_control"
+DEFAULT_NAME = "Dynamic HVAC Control"
 
 # Configuration Keys - Entities
 CONF_TARGET_CLIMATE = "target_climate"

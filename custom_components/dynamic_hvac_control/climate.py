@@ -163,12 +163,12 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the Dynamic HVAC Control entity."""
-    entity = SmartCentralClimateEntity(hass, entry)
+    entity = DynamicHvacControlEntity(hass, entry)
     hass.data[DOMAIN][entry.entry_id]["climate_entity"] = entity
     async_add_entities([entity])
 
 
-class SmartCentralClimateEntity(RestoreEntity, ClimateEntity):
+class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
     """Dynamic HVAC Control entity featuring built-in 4-slot scheduling, two-way sync, and 3-tier safety."""
 
     _attr_has_entity_name = True
@@ -189,7 +189,7 @@ class SmartCentralClimateEntity(RestoreEntity, ClimateEntity):
         self._attr_unique_id = f"{entry.entry_id}_climate"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.data.get(CONF_NAME, "Smart Central A/C"),
+            name=entry.data.get(CONF_NAME, "Dynamic HVAC Control"),
             manufacturer="Dynamic HVAC Control",
             model="Central A/C & Heat Pump Controller",
         )

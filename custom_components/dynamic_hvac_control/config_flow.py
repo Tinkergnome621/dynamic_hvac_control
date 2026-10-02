@@ -114,7 +114,7 @@ PRESET_OPTIONS = [
 ]
 
 
-class SmartCentralClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class DynamicHvacControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Dynamic HVAC Control."""
 
     VERSION = 2
@@ -133,7 +133,7 @@ class SmartCentralClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Required("name", default="Smart Central A/C"): str,
+                vol.Required("name", default="Dynamic HVAC Control"): str,
                 vol.Required(CONF_TARGET_CLIMATE): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="climate")
                 ),
@@ -260,7 +260,7 @@ class SmartCentralClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 user_input[CONF_NOTIFY_SERVICE] = f"notify.{service}"
             self._data.update(user_input)
             return self.async_create_entry(
-                title=self._data.get("name", "Smart Central A/C"), data=self._data
+                title=self._data.get("name", "Dynamic HVAC Control"), data=self._data
             )
 
         schema = vol.Schema(
@@ -282,10 +282,10 @@ class SmartCentralClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
         """Get the options flow to modify settings anytime."""
-        return SmartCentralClimateOptionsFlow()
+        return DynamicHvacControlOptionsFlow()
 
 
-class SmartCentralClimateOptionsFlow(config_entries.OptionsFlow):
+class DynamicHvacControlOptionsFlow(config_entries.OptionsFlow):
     """Handle options menu to modify temperatures, schedules, and delays anytime."""
 
     def __init__(self) -> None:

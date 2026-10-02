@@ -19,10 +19,15 @@ PLATFORMS: list[Platform] = [Platform.CLIMATE, Platform.SWITCH]
 CARD_DIR = os.path.join(os.path.dirname(__file__), "frontend")
 CARD_PATH = os.path.join(CARD_DIR, "dynamic-hvac-control-card.js")
 CARD_URL = "/dynamic_hvac_control/dynamic-hvac-control-card.js"
+DATA_CARD_REGISTERED = f"{DOMAIN}_card_registered"
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
-    """Register custom card static path and frontend resource."""
+    """Register custom card static path and frontend resource once per HA start."""
+    if hass.data.get(DATA_CARD_REGISTERED):
+        return
+    hass.data[DATA_CARD_REGISTERED] = True
+
     if not os.path.exists(CARD_PATH):
         _LOGGER.warning("Bundled card not found at %s", CARD_PATH)
         return

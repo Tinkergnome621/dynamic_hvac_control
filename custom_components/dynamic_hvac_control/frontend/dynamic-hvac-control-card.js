@@ -28,17 +28,17 @@ class DynamicHvacControlCard extends HTMLElement {
 
   static getStubConfig() {
     return {
-      entity: "climate.smart_central_climate",
-      name: "Smart Central Climate"
+      entity: "climate.dynamic_hvac_control",
+      name: "Dynamic HVAC Control"
     };
   }
 
   setConfig(config) {
     if (!config.entity) {
-      throw new Error("Please define an entity in your card configuration (e.g. climate.smart_central_climate)");
+      throw new Error("Please define an entity in your card configuration (e.g. climate.dynamic_hvac_control)");
     }
     this._config = {
-      name: "Smart Central Climate",
+      name: "Dynamic HVAC Control",
       step: 1.0,
       min_temp: 60,
       max_temp: 85,
@@ -580,9 +580,9 @@ class DynamicHvacControlCard extends HTMLElement {
             <svg viewBox="0 0 24 24">
               <path d="M15 13V5a3 3 0 0 0-6 0v8a5 5 0 1 0 6 0m-3-10a1 1 0 0 1 1 1v4.5a.5.5 0 0 0 1 0V4a1 1 0 0 1 2 0v5.5a.5.5 0 0 0 1 0V7a1 1 0 0 1 2 0v6a7 7 0 1 1-14 0V4a1 1 0 0 1 2 0v3a.5.5 0 0 0 1 0V4a1 1 0 0 1 2 0v5.5a.5.5 0 0 0 1 0V4a1 1 0 0 1 1-1"/>
             </svg>
-            <span id="title-text">Smart Central Climate</span>
+            <span id="title-text">Dynamic HVAC Control</span>
           </div>
-          <div class="version-badge" id="version-badge">v1.5.4 • LOCAL PUSH</div>
+          <div class="version-badge" id="version-badge">v1.0.0 • LOCAL PUSH</div>
         </div>
 
         <!-- TOP 2-COLUMN GRID (LEFT VERTICAL PLENUM STACK, RIGHT DIAL) -->
@@ -854,7 +854,7 @@ class DynamicHvacControlCard extends HTMLElement {
 
     // Header title
     const titleEl = root.getElementById('title-text');
-    if (titleEl) titleEl.textContent = this._config.name || attrs.friendly_name || "Smart Central Climate";
+    if (titleEl) titleEl.textContent = this._config.name || attrs.friendly_name || "Dynamic HVAC Control";
 
     // Current Room Temperature
     const currentTemp = attrs.current_temperature !== undefined ? attrs.current_temperature : null;
@@ -1382,7 +1382,8 @@ if (!customElements.get('dynamic-hvac-control-card')) {
   customElements.define('dynamic-hvac-control-card', DynamicHvacControlCard);
 }
 if (!customElements.get('smart-central-climate-card')) {
-  customElements.define('smart-central-climate-card', DynamicHvacControlCard);
+  class LegacySmartCentralClimateCard extends DynamicHvacControlCard {}
+  customElements.define('smart-central-climate-card', LegacySmartCentralClimateCard);
 }
 
 // Add Card to HA UI Card Picker
@@ -1392,7 +1393,7 @@ window.customCards.push({
   name: "Dynamic HVAC Control Card",
   description: "Redesigned circular dual-slider thermostat with plenum diagnostics, Delta-T split, and fan control",
   preview: true,
-  documentationURL: "https://github.com/Tinkergnome621/dynamic-hvac-control-card"
+  documentationURL: "https://github.com/Tinkergnome621/dynamic_hvac_control"
 });
 
 console.info(

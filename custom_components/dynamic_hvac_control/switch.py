@@ -22,13 +22,13 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the Vacation Mode switch entity."""
-    entity = SmartCentralVacationSwitch(hass, entry)
+    entity = DynamicHvacVacationSwitch(hass, entry)
     # Store switch reference in hass.data for direct two-way synchronization
     hass.data[DOMAIN][entry.entry_id]["switch_entity"] = entity
     async_add_entities([entity])
 
 
-class SmartCentralVacationSwitch(SwitchEntity):
+class DynamicHvacVacationSwitch(SwitchEntity):
     """Switch entity to toggle Vacation Mode on/off."""
 
     _attr_has_entity_name = True
@@ -43,7 +43,7 @@ class SmartCentralVacationSwitch(SwitchEntity):
         self._attr_unique_id = f"{entry.entry_id}_vacation_mode"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.data.get(CONF_NAME, "Smart Central A/C"),
+            name=entry.data.get(CONF_NAME, "Dynamic HVAC Control"),
             manufacturer="Dynamic HVAC Control",
             model="Central A/C & Heat Pump Controller",
         )
