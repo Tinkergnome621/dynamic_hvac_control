@@ -1,15 +1,15 @@
 /**
- * Dynamic HVAC Control Card (v1.0.2)
+ * Dynamic HVAC Control Card (v1.0.3)
  * Custom Lovelace Card for Home Assistant
  * Designed for Central A/C and Heat Pump Dual-Setpoint Range Systems
  * 
  * Features:
- * - Dual-knob circular arc dial (Heat / Cool setpoints with emerald deadband)
- * - Single-knob operation in Cool-only and Heat-only modes with working steppers & drag
+ * - 180° rainbow dial with draggable Heat / Cool knobs (stop at the minimum gap) and emerald deadband
+ * - Single-knob drag operation in Cool-only and Heat-only modes
  * - Icon-only HVAC status indicator (Green thermometer for Idle, Red flame for Heat, Blue snowflake for Cool)
  * - Vertical duct plenum probe stack on the left (Auto-hides if no plenum sensors are present)
  * - True sensor readouts without dummy fallback numbers ("—" when unavailable)
- * - Minimalist Blower Fan toggle switch (Auto-hides if no fan entity exists)
+ * - Fan button: label shows the Auto/On setting; propeller spins blue when the blower runs; shows when Fan On returns to Auto
  * - Non-destructive target range views preserving DOM structure across mode changes
  * - Robust entity unavailable overlay with automatic live recovery
  * - Dragging debounce preventing incoming state jitter
@@ -97,7 +97,7 @@ class DynamicHvacControlCard extends HTMLElement {
         .header {
           display: flex;
           align-items: center;
-          justify-content: space-between;
+          justify-content: center;
           margin-bottom: 16px;
         }
         .header-title {
@@ -113,16 +113,18 @@ class DynamicHvacControlCard extends HTMLElement {
           height: 20px;
           fill: var(--primary-color, #38bdf8);
         }
-        .version-badge {
-          font-size: 0.7rem;
-          font-weight: 700;
-          color: var(--secondary-text-color, #94a3b8);
-          background: var(--secondary-background-color, rgba(255, 255, 255, 0.05));
-          border: 1px solid var(--divider-color, rgba(255, 255, 255, 0.1));
-          padding: 4px 10px;
-          border-radius: 9999px;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
+        .header-title img {
+          width: 24px;
+          height: 24px;
+          border-radius: 6px;
+          object-fit: contain;
+        }
+        .version-footer {
+          text-align: right;
+          font-size: 0.65rem;
+          color: var(--secondary-text-color, #64748b);
+          margin-top: 10px;
+          letter-spacing: 0.02em;
         }
 
         /* Top 2-Column Grid: Left Plenum Stack + Right Dial */
@@ -175,8 +177,8 @@ class DynamicHvacControlCard extends HTMLElement {
           color: #10b981;
         }
         .plenum-value {
-          font-size: 1.05rem;
-          font-weight: 800;
+          font-size: 0.75rem;
+          font-weight: 700;
           color: var(--primary-text-color, #f8fafc);
           font-variant-numeric: tabular-nums;
         }
@@ -186,15 +188,18 @@ class DynamicHvacControlCard extends HTMLElement {
         }
 
         /* Dial Container */
+        .dial-column {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 8px;
+        }
         .dial-container {
           position: relative;
           width: 100%;
-          max-width: 250px;
+          max-width: 280px;
           margin: 0 auto;
-          aspect-ratio: 1 / 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+          aspect-ratio: 240 / 150;
         }
         svg.dial-svg {
           width: 100%;
@@ -246,7 +251,8 @@ class DynamicHvacControlCard extends HTMLElement {
           display: flex;
           flex-direction: column;
           align-items: center;
-          justify-content: center;
+          justify-content: flex-end;
+          padding-bottom: 6%;
           pointer-events: none;
           text-align: center;
           z-index: 5;
@@ -326,51 +332,42 @@ class DynamicHvacControlCard extends HTMLElement {
           margin-left: 2px;
         }
 
-        /* Minimalist Fan Toggle Switch */
-        .fan-toggle-wrap {
-          pointer-events: auto;
-          display: flex;
-          flex-direction: column;
+        /* Fan Button: label = integration setting (Auto/On); propeller = blower actually running */
+        .fan-btn {
+          display: inline-flex;
           align-items: center;
-          gap: 2px;
-          cursor: pointer;
-          margin-top: 4px;
-        }
-        .fan-icon-btn {
-          width: 32px;
-          height: 32px;
-          border-radius: 50%;
+          gap: 6px;
+          padding: 6px 16px;
+          border-radius: 9999px;
+          border: 1px solid var(--divider-color, #334155);
           background: var(--secondary-background-color, #191e2b);
-          border: 1.5px solid var(--divider-color, #334155);
-          display: flex;
-          align-items: center;
-          justify-content: center;
+          color: var(--primary-text-color, #e2e8f0);
+          font-size: 0.75rem;
+          font-weight: 700;
+          cursor: pointer;
           transition: all 0.2s ease;
         }
-        .fan-icon-btn svg {
-          width: 17px;
-          height: 17px;
-          fill: var(--secondary-text-color, #64748b);
-          transition: transform 0.2s ease;
+        .fan-btn:hover {
+          filter: brightness(1.15);
         }
-        .fan-toggle-wrap.active .fan-icon-btn {
-          background: rgba(14, 165, 233, 0.18);
+        .fan-btn.mode-on {
           border-color: #0ea5e9;
-          box-shadow: 0 0 12px rgba(14, 165, 233, 0.4);
         }
-        .fan-toggle-wrap.active .fan-icon-btn svg {
+        .fan-btn svg {
+          width: 16px;
+          height: 16px;
+          fill: #64748b;
+          transition: fill 0.2s ease;
+        }
+        .fan-btn.running svg {
           fill: #38bdf8;
-          animation: spin-fan 2s linear infinite;
+          animation: spin-fan 1.6s linear infinite;
         }
-        .fan-text-label {
+        .fan-note {
           font-size: 0.65rem;
-          font-weight: 800;
-          letter-spacing: 0.08em;
-          color: var(--secondary-text-color, #64748b);
-          text-transform: uppercase;
-        }
-        .fan-toggle-wrap.active .fan-text-label {
           color: #38bdf8;
+          min-height: 0.9rem;
+          text-align: center;
         }
 
         @keyframes spin-fan {
@@ -417,48 +414,6 @@ class DynamicHvacControlCard extends HTMLElement {
         }
         .target-range-subline strong {
           color: var(--primary-text-color, #f1f5f9);
-        }
-
-        /* Steppers Row */
-        .stepper-row {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 12px;
-          margin-top: 12px;
-        }
-        .stepper-group {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-        .btn-step {
-          width: 34px;
-          height: 34px;
-          border-radius: 10px;
-          background: var(--secondary-background-color, #1f2533);
-          border: 1px solid var(--divider-color, rgba(255, 255, 255, 0.1));
-          color: var(--primary-text-color, #ffffff);
-          font-size: 1.1rem;
-          font-weight: 800;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: all 0.15s ease;
-        }
-        .btn-step:hover {
-          filter: brightness(1.2);
-        }
-        .btn-step:active {
-          transform: scale(0.92);
-        }
-        .stepper-label {
-          font-size: 0.7rem;
-          font-weight: 700;
-          text-transform: uppercase;
-          color: var(--secondary-text-color, #64748b);
-          padding: 0 4px;
         }
 
         /* Mode Selector Buttons */
@@ -577,12 +532,12 @@ class DynamicHvacControlCard extends HTMLElement {
         <!-- HEADER -->
         <div class="header">
           <div class="header-title">
-            <svg viewBox="0 0 24 24">
+            <img id="hdr-icon" src="/dynamic_hvac_control/icon.png" alt="" />
+            <svg id="hdr-icon-fallback" viewBox="0 0 24 24" style="display: none;">
               <path d="M15 13V5a3 3 0 0 0-6 0v8a5 5 0 1 0 6 0m-3-10a1 1 0 0 1 1 1v4.5a.5.5 0 0 0 1 0V4a1 1 0 0 1 2 0v5.5a.5.5 0 0 0 1 0V7a1 1 0 0 1 2 0v6a7 7 0 1 1-14 0V4a1 1 0 0 1 2 0v3a.5.5 0 0 0 1 0V4a1 1 0 0 1 2 0v5.5a.5.5 0 0 0 1 0V4a1 1 0 0 1 1-1"/>
             </svg>
             <span id="title-text">Dynamic HVAC Control</span>
           </div>
-          <div class="version-badge" id="version-badge">v1.0.2 • LOCAL PUSH</div>
         </div>
 
         <!-- TOP 2-COLUMN GRID (LEFT VERTICAL PLENUM STACK, RIGHT DIAL) -->
@@ -617,9 +572,10 @@ class DynamicHvacControlCard extends HTMLElement {
             </div>
           </div>
 
-          <!-- CIRCULAR ARC DIAL -->
+          <!-- RAINBOW ARC DIAL + FAN BUTTON -->
+          <div class="dial-column">
           <div class="dial-container" id="dial-wrap">
-            <svg class="dial-svg" viewBox="0 0 240 240" id="dial-svg">
+            <svg class="dial-svg" viewBox="0 0 240 150" id="dial-svg">
               <defs>
                 <filter id="shadow-knob" x="-40%" y="-40%" width="180%" height="180%">
                   <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000000" flood-opacity="0.6"/>
@@ -669,16 +625,17 @@ class DynamicHvacControlCard extends HTMLElement {
                 <span class="temp-unit">°F</span>
               </div>
 
-              <!-- Bottom: Minimal Fan Control -->
-              <div class="fan-toggle-wrap" id="fan-toggle-btn" title="Toggle Blower Fan" style="display: none;">
-                <div class="fan-icon-btn">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M12 11a1 1 0 1 0 1 1 1 1 0 0 0-1-1m0-9a4 4 0 0 0-4 4c0 1.9 1.3 3.5 3 3.9V4a1 1 0 0 1 2 0v5.9c1.7-.4 3-2 3-3.9a4 4 0 0 0-4-4m-9 14a4 4 0 0 0 4 4c1.9 0 3.5-1.3 3.9-3H5a1 1 0 0 1 0-2h5.9c-.4-1.7-2-3-3.9-3a4 4 0 0 0-4 4m18-4a4 4 0 0 0-4-4c-1.9 0-3.5 1.3-3.9 3H19a1 1 0 0 1 0 2h-5.9c.4 1.7 2 3 3.9 3a4 4 0 0 0 4-4m-9 5a4 4 0 0 0 4-4c0-1.9-1.3-3.5-3-3.9V19a1 1 0 0 1-2 0v-5.9c-1.7.4-3 2-3 3.9a4 4 0 0 0 4 4"/>
-                  </svg>
-                </div>
-                <div class="fan-text-label" id="fan-text-label">FAN OFF</div>
-              </div>
             </div>
+          </div>
+
+          <!-- Fan: label shows the setting, propeller spins blue when the blower is running -->
+          <button class="fan-btn" id="fan-toggle-btn" title="Fan: Auto runs with heating/cooling, On runs continuously" style="display: none;">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 11a1 1 0 1 0 1 1 1 1 0 0 0-1-1m0-9a4 4 0 0 0-4 4c0 1.9 1.3 3.5 3 3.9V4a1 1 0 0 1 2 0v5.9c1.7-.4 3-2 3-3.9a4 4 0 0 0-4-4m-9 14a4 4 0 0 0 4 4c1.9 0 3.5-1.3 3.9-3H5a1 1 0 0 1 0-2h5.9c-.4-1.7-2-3-3.9-3a4 4 0 0 0-4 4m18-4a4 4 0 0 0-4-4c-1.9 0-3.5 1.3-3.9 3H19a1 1 0 0 1 0 2h-5.9c.4 1.7 2 3 3.9 3a4 4 0 0 0 4-4m-9 5a4 4 0 0 0 4-4c0-1.9-1.3-3.5-3-3.9V19a1 1 0 0 1-2 0v-5.9c-1.7.4-3 2-3 3.9a4 4 0 0 0 4 4"/>
+            </svg>
+            <span id="fan-text-label">Fan: Auto</span>
+          </button>
+          <div class="fan-note" id="fan-note"></div>
           </div>
         </div>
 
@@ -712,31 +669,6 @@ class DynamicHvacControlCard extends HTMLElement {
           </div>
         </div>
 
-        <!-- STEPPERS FOR PRECISE TARGET ADJUSTMENT -->
-        <!-- Dual Steppers (Heat/Cool Mode) -->
-        <div class="stepper-row" id="stepper-row-dual">
-          <div class="stepper-group">
-            <button class="btn-step" id="btn-minus-low" title="Lower Heat Target">−</button>
-            <span class="stepper-label target-heat-tag">Heat</span>
-            <button class="btn-step" id="btn-plus-low" title="Raise Heat Target">+</button>
-          </div>
-          <span style="font-size: 0.75rem; color: var(--secondary-text-color, #64748b);">|</span>
-          <div class="stepper-group">
-            <button class="btn-step" id="btn-minus-high" title="Lower Cool Target">−</button>
-            <span class="stepper-label target-cool-tag">Cool</span>
-            <button class="btn-step" id="btn-plus-high" title="Raise Cool Target">+</button>
-          </div>
-        </div>
-
-        <!-- Single Steppers (Cool or Heat Mode) -->
-        <div class="stepper-row" id="stepper-row-single" style="display: none;">
-          <div class="stepper-group">
-            <button class="btn-step" id="btn-minus-single" title="Lower Target">−</button>
-            <span class="stepper-label" id="label-step-single">Target</span>
-            <button class="btn-step" id="btn-plus-single" title="Raise Target">+</button>
-          </div>
-        </div>
-
         <!-- MODE SELECTOR BUTTONS -->
         <div class="mode-row">
           <button class="btn-mode active" id="btn-mode-heat-cool" data-mode="heat_cool">
@@ -766,6 +698,8 @@ class DynamicHvacControlCard extends HTMLElement {
           <button class="btn-preset" id="btn-preset-vacation" data-preset="vacation">Vacation</button>
           <button class="btn-preset" id="btn-preset-none" data-preset="none">Hold</button>
         </div>
+
+        <div class="version-footer" id="version-footer">v1.0.3 · local push</div>
       </ha-card>
     `;
 
@@ -790,20 +724,31 @@ class DynamicHvacControlCard extends HTMLElement {
   }
 
   /* -------------------------------------------------------------------------
-   * Dial Arc Geometry Calculation (240x240 SVG, Center 120, 120, Radius 86)
-   * Arc spans from 135 deg (bottom-left) to 45 deg (bottom-right) -> 270 deg
+   * Dial Arc Geometry: 180° rainbow (viewBox 240x150, center 120,130, radius 100)
+   * Angles are measured clockwise from 12 o'clock: -90 = left end, 0 = top, +90 = right end.
    * ------------------------------------------------------------------------- */
   _initArcGeometry() {
+    this._vbW = 240;
+    this._vbH = 150;
     this._cx = 120;
-    this._cy = 120;
-    this._radius = 86;
-    this._startAngle = 135; // degrees
-    this._endAngle = 405;   // degrees (135 + 270)
-    this._totalAngle = 270;
+    this._cy = 130;
+    this._radius = 100;
+    this._startAngle = -90; // left end (min temp)
+    this._endAngle = 90;    // right end (max temp)
+    this._totalAngle = 180;
 
     const track = this.shadowRoot.getElementById('path-track');
     if (track) {
       track.setAttribute('d', this._describeArc(this._cx, this._cy, this._radius, this._startAngle, this._endAngle));
+    }
+
+    const icon = this.shadowRoot.getElementById('hdr-icon');
+    const fallback = this.shadowRoot.getElementById('hdr-icon-fallback');
+    if (icon && fallback) {
+      icon.addEventListener('error', () => {
+        icon.style.display = 'none';
+        fallback.style.display = 'block';
+      });
     }
   }
 
@@ -836,10 +781,11 @@ class DynamicHvacControlCard extends HTMLElement {
   _angleToTemp(angle) {
     const min = this._config.min_temp || 60;
     const max = this._config.max_temp || 85;
-    let normalized = angle;
-    while (normalized < this._startAngle) normalized += 360;
-    while (normalized > this._endAngle) normalized -= 360;
-    const fraction = Math.max(0, Math.min(1, (normalized - this._startAngle) / this._totalAngle));
+    // Below the arch: snap to whichever end the pointer is nearest
+    let a = angle;
+    if (a > 90) a = 90;
+    if (a < -90) a = -90;
+    const fraction = (a - this._startAngle) / this._totalAngle;
     const raw = min + (fraction * (max - min));
     const step = this._config.step || 1.0;
     return Math.round(raw / step) * step;
@@ -980,26 +926,26 @@ class DynamicHvacControlCard extends HTMLElement {
       }
     }
 
-    // Fan Status & Visibility (Hide if no fan entity configured)
+    // Fan Button: label = integration fan setting; propeller color/spin = blower actually running
     const fanWrap = root.getElementById('fan-toggle-btn');
     const fanLabel = root.getElementById('fan-text-label');
+    const fanNote = root.getElementById('fan-note');
     const hasFanEntity = Boolean(attrs.fan_entity || (attrs.fan_modes && attrs.fan_modes.length > 0) || this._config.fan_switch);
-
-    const fanState = attrs.fan_state || attrs.fan_mode || 'off';
-    const isFanOn = fanState === 'on' || fanState === 'low' || fanState === 'medium' || fanState === 'high';
+    const fanModeOn = attrs.fan_mode === 'on';
+    const blowerRunning = (typeof attrs.blower_running === 'boolean')
+      ? attrs.blower_running
+      : (fanModeOn || hvacAction === 'cooling' || hvacAction === 'heating');
 
     if (fanWrap && fanLabel) {
       if (!hasFanEntity) {
         fanWrap.style.display = 'none';
+        if (fanNote) fanNote.textContent = '';
       } else {
-        fanWrap.style.display = 'flex';
-        if (isFanOn) {
-          fanWrap.classList.add('active');
-          fanLabel.textContent = 'FAN ON';
-        } else {
-          fanWrap.classList.remove('active');
-          fanLabel.textContent = 'FAN OFF';
-        }
+        fanWrap.style.display = 'inline-flex';
+        fanLabel.textContent = fanModeOn ? 'Fan: On' : 'Fan: Auto';
+        fanWrap.classList.toggle('mode-on', fanModeOn);
+        fanWrap.classList.toggle('running', blowerRunning);
+        if (fanNote) fanNote.textContent = fanModeOn ? this._fanRevertText(attrs) : '';
       }
     }
 
@@ -1113,28 +1059,6 @@ class DynamicHvacControlCard extends HTMLElement {
       }
     }
 
-    // Steppers Row Visibility & Adaptability
-    const dualSteppers = root.getElementById('stepper-row-dual');
-    const singleSteppers = root.getElementById('stepper-row-single');
-    const labelStepSingle = root.getElementById('label-step-single');
-
-    if (dualSteppers && singleSteppers) {
-      if (isHeatCool) {
-        dualSteppers.style.display = 'flex';
-        singleSteppers.style.display = 'none';
-      } else if (hvacMode === 'cool' || hvacMode === 'heat') {
-        dualSteppers.style.display = 'none';
-        singleSteppers.style.display = 'flex';
-        if (labelStepSingle) {
-          labelStepSingle.textContent = hvacMode === 'heat' ? 'Heat' : 'Cool';
-          labelStepSingle.className = hvacMode === 'heat' ? 'stepper-label target-heat-tag' : 'stepper-label target-cool-tag';
-        }
-      } else {
-        dualSteppers.style.display = 'none';
-        singleSteppers.style.display = 'none';
-      }
-    }
-
     // Average House & Wall Thermostat Breakdown (True data, no hardcoded dummy fallbacks)
     const subAvg = root.getElementById('sub-avg-temp');
     const subWall = root.getElementById('sub-wall-temp');
@@ -1213,24 +1137,6 @@ class DynamicHvacControlCard extends HTMLElement {
       });
     });
 
-    // Dual Mode Steppers
-    const btnMinusLow = root.getElementById('btn-minus-low');
-    const btnPlusLow = root.getElementById('btn-plus-low');
-    const btnMinusHigh = root.getElementById('btn-minus-high');
-    const btnPlusHigh = root.getElementById('btn-plus-high');
-
-    if (btnMinusLow) btnMinusLow.addEventListener('click', () => this._stepTemp('low', -1));
-    if (btnPlusLow) btnPlusLow.addEventListener('click', () => this._stepTemp('low', 1));
-    if (btnMinusHigh) btnMinusHigh.addEventListener('click', () => this._stepTemp('high', -1));
-    if (btnPlusHigh) btnPlusHigh.addEventListener('click', () => this._stepTemp('high', 1));
-
-    // Single Mode Steppers (Works in Cool and Heat mode)
-    const btnMinusSingle = root.getElementById('btn-minus-single');
-    const btnPlusSingle = root.getElementById('btn-plus-single');
-
-    if (btnMinusSingle) btnMinusSingle.addEventListener('click', () => this._stepTemp('single', -1));
-    if (btnPlusSingle) btnPlusSingle.addEventListener('click', () => this._stepTemp('single', 1));
-
     // Knob Dragging Interaction
     const knobHeat = root.getElementById('knob-heat');
     const knobCool = root.getElementById('knob-cool');
@@ -1270,12 +1176,12 @@ class DynamicHvacControlCard extends HTMLElement {
     if (!svg) return;
 
     const rect = svg.getBoundingClientRect();
-    const x = event.clientX - rect.left - (rect.width / 2);
-    const y = event.clientY - rect.top - (rect.height / 2);
+    const x = event.clientX - rect.left - (rect.width * this._cx / this._vbW);
+    const y = event.clientY - rect.top - (rect.height * this._cy / this._vbH);
 
-    let rad = Math.atan2(y, x);
-    let deg = (rad * 180 / Math.PI) + 90;
-    if (deg < 0) deg += 360;
+    // Angle clockwise from 12 o'clock, in (-180, 180]
+    let deg = (Math.atan2(y, x) * 180 / Math.PI) + 90;
+    if (deg > 180) deg -= 360;
 
     const temp = this._angleToTemp(deg);
     const minT = this._config.min_temp || 60;
@@ -1300,24 +1206,6 @@ class DynamicHvacControlCard extends HTMLElement {
   _endDrag() {
     if (!this._dragging) return;
     this._dragging = null;
-    this._commitTemperature();
-  }
-
-  _stepTemp(target, delta) {
-    const minT = this._config.min_temp || 60;
-    const maxT = this._config.max_temp || 85;
-
-    const minGap = this._getMinGap();
-    if (target === 'low') {
-      this._tempLow = Math.max(minT, Math.min(this._tempHigh - minGap, this._tempLow + delta));
-    } else if (target === 'high') {
-      this._tempHigh = Math.max(this._tempLow + minGap, Math.min(maxT, this._tempHigh + delta));
-    } else if (target === 'single') {
-      this._tempSingle = Math.max(minT, Math.min(maxT, this._tempSingle + delta));
-    }
-
-    const stateObj = this._hass.states[this._config.entity];
-    if (stateObj) this._updateCard(stateObj);
     this._commitTemperature();
   }
 
@@ -1356,13 +1244,25 @@ class DynamicHvacControlCard extends HTMLElement {
     });
   }
 
+  _fanRevertText(attrs) {
+    const until = attrs.fan_on_until ? new Date(attrs.fan_on_until) : null;
+    if (!until || isNaN(until.getTime())) return 'Stays on until switched off';
+    const now = new Date();
+    const sameDay = until.toDateString() === now.toDateString();
+    const time = until.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const when = sameDay ? time : `${until.toLocaleDateString([], { weekday: 'short' })} ${time}`;
+    return attrs.fan_revert_reason === 'schedule'
+      ? `Back to Auto at ${when} (next schedule)`
+      : `Back to Auto at ${when}`;
+  }
+
   _toggleFan() {
     if (!this._hass || !this._config.entity) return;
     const stateObj = this._hass.states[this._config.entity];
     const attrs = stateObj ? stateObj.attributes : {};
-    const fanState = attrs.fan_state || attrs.fan_mode || 'off';
+    const fanState = attrs.fan_state || 'off';
     const isFanOn = fanState === 'on' || fanState === 'low' || fanState === 'medium' || fanState === 'high';
-    const nextMode = isFanOn ? 'auto' : 'on';
+    const nextMode = attrs.fan_mode === 'on' ? 'auto' : 'on';
 
     if (this._config.fan_switch) {
       this._hass.callService("switch", isFanOn ? "turn_off" : "turn_on", {
@@ -1387,13 +1287,13 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "dynamic-hvac-control-card",
   name: "Dynamic HVAC Control Card",
-  description: "Redesigned circular dual-slider thermostat with plenum diagnostics, Delta-T split, and fan control",
+  description: "Rainbow dual-setpoint thermostat with plenum diagnostics, Delta-T split, and fan control",
   preview: true,
   documentationURL: "https://github.com/Tinkergnome621/dynamic_hvac_control"
 });
 
 console.info(
-  "%c DYNAMIC-HVAC-CONTROL-CARD %c v1.0.2 ",
+  "%c DYNAMIC-HVAC-CONTROL-CARD %c v1.0.3 ",
   "color: white; background: #0284c7; font-weight: 700; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #0f172a; font-weight: 700; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );

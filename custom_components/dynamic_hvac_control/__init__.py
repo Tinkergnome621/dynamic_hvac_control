@@ -19,6 +19,8 @@ PLATFORMS: list[Platform] = [Platform.CLIMATE, Platform.SWITCH]
 CARD_DIR = os.path.join(os.path.dirname(__file__), "frontend")
 CARD_PATH = os.path.join(CARD_DIR, "dynamic-hvac-control-card.js")
 CARD_URL = "/dynamic_hvac_control/dynamic-hvac-control-card.js"
+ICON_PATH = os.path.join(os.path.dirname(__file__), "brand", "icon.png")
+ICON_URL = "/dynamic_hvac_control/icon.png"
 DATA_CARD_REGISTERED = f"{DOMAIN}_card_registered"
 
 
@@ -36,11 +38,14 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     try:
         if hasattr(hass.http, "async_register_static_paths"):
             from homeassistant.components.http import StaticPathConfig
-            await hass.http.async_register_static_paths([
-                StaticPathConfig(CARD_URL, CARD_PATH, False)
-            ])
+            paths = [StaticPathConfig(CARD_URL, CARD_PATH, False)]
+            if os.path.exists(ICON_PATH):
+                paths.append(StaticPathConfig(ICON_URL, ICON_PATH, True))
+            await hass.http.async_register_static_paths(paths)
         elif hasattr(hass.http, "register_static_path"):
             hass.http.register_static_path(CARD_URL, CARD_PATH, False)
+            if os.path.exists(ICON_PATH):
+                hass.http.register_static_path(ICON_URL, ICON_PATH, True)
         _LOGGER.info("Registered Dynamic HVAC Control Card static path at %s", CARD_URL)
     except Exception as err:
         _LOGGER.error("Failed to register static path for card: %s", err)

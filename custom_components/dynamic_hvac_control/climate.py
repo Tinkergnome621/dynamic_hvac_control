@@ -33,10 +33,11 @@ from homeassistant.const import (
     STATE_UNKNOWN,
     UnitOfTemperature,
 )
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import Context, Event, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import (
     async_call_later,
+    async_track_point_in_utc_time,
     async_track_state_change_event,
     async_track_time_change,
     async_track_time_interval,
@@ -47,6 +48,8 @@ from homeassistant.helpers.start import async_at_started
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_FAN_ON_MAX_HOURS,
+    DEFAULT_FAN_ON_MAX_HOURS,
     CONF_AWAY_COOL,
     CONF_AWAY_HEAT,
     CONF_BOOST_COOL,
@@ -286,6 +289,12 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
         self._logged_emergency_fallback: bool = False
         self._last_scheduled_slot: str | None = None
         self._user_fan_mode: str = "auto"
+        # Fan On auto-revert (next schedule slot, Away, or max-hours cap)
+        self._fan_on_max_hours: int = int(cfg.get(CONF_FAN_ON_MAX_HOURS, DEFAULT_FAN_ON_MAX_HOURS))
+        self._fan_on_since: datetime | None = None
+        self._fan_on_until: datetime | None = None
+        self._fan_revert_reason: str = "none"
+        self._fan_cap_cancel = None
 
         # Two-Way Dial Sync & Hardware State Tracking
         self._last_sent_physical_mode: str | None = None
@@ -391,14 +400,98 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set fan mode (toggle blower between On and Auto)."""
-        if not self._fan_entity:
+        if not self._fan_entity or fan_mode not in ("auto", "on"):
             return
         self._user_fan_mode = fan_mode
         if fan_mode == "on":
-            await self.hass.services.async_call("fan", "turn_on", {ATTR_ENTITY_ID: self._fan_entity}, blocking=False)
+            self._fan_on_since = dt_util.utcnow()
+            self._async_plan_fan_revert()
+            _LOGGER.info(
+                "[TEST LOG][FAN] Fan set to ON. Will return to Auto: %s (reason: %s).",
+                dt_util.as_local(self._fan_on_until).strftime("%Y-%m-%d %I:%M %p") if self._fan_on_until else "never",
+                self._fan_revert_reason,
+            )
+            await self._async_service("fan", "turn_on", {ATTR_ENTITY_ID: self._fan_entity})
         else:
+            self._async_clear_fan_revert()
+            _LOGGER.info("[TEST LOG][FAN] Fan set to AUTO by user.")
             if self._hvac_action not in (HVACAction.COOLING, HVACAction.HEATING):
-                await self.hass.services.async_call("fan", "turn_off", {ATTR_ENTITY_ID: self._fan_entity}, blocking=False)
+                await self._async_service("fan", "turn_off", {ATTR_ENTITY_ID: self._fan_entity})
+        self.async_write_ha_state()
+
+    async def _async_service(
+        self, domain: str, service: str, data: dict[str, Any], context: Context | None = None
+    ) -> None:
+        """Call a service, carrying the triggering user's context so the logbook shows who did it."""
+        await self.hass.services.async_call(
+            domain, service, data, blocking=False, context=context or self._context
+        )
+
+    def _next_schedule_slot_after(self, after: datetime) -> datetime | None:
+        """Return the first schedule slot start (UTC) strictly after `after`, or None if the schedule can't fire."""
+        if not self._enable_schedule or self._preset_mode == PRESET_VACATION:
+            return None
+        tz = dt_util.get_default_time_zone()
+        local_after = dt_util.as_local(after)
+        for add_days in range(0, 8):
+            day = (local_after + timedelta(days=add_days)).date()
+            slots = self._wd_slots if day.weekday() < 5 else self._we_slots
+            candidates: list[datetime] = []
+            for slot_time, _preset in slots:
+                try:
+                    hh, mm = (int(x) for x in str(slot_time)[:5].split(":"))
+                except ValueError:
+                    continue
+                start = dt_util.as_utc(datetime(day.year, day.month, day.day, hh, mm, tzinfo=tz))
+                if start > after:
+                    candidates.append(start)
+            if candidates:
+                return min(candidates)
+        return None
+
+    @callback
+    def _async_plan_fan_revert(self) -> None:
+        """Work out when Fan On returns to Auto and arm the max-hours cap timer."""
+        if self._fan_cap_cancel:
+            self._fan_cap_cancel()
+            self._fan_cap_cancel = None
+        since = self._fan_on_since or dt_util.utcnow()
+        slot = self._next_schedule_slot_after(since)
+        cap = since + timedelta(hours=self._fan_on_max_hours) if self._fan_on_max_hours > 0 else None
+        if slot and (cap is None or slot <= cap):
+            self._fan_on_until, self._fan_revert_reason = slot, "schedule"
+        elif cap:
+            self._fan_on_until, self._fan_revert_reason = cap, "max_hours"
+        else:
+            self._fan_on_until, self._fan_revert_reason = None, "none"
+        if cap and cap > dt_util.utcnow():
+            self._fan_cap_cancel = async_track_point_in_utc_time(self.hass, self._async_fan_cap_reached, cap)
+
+    @callback
+    def _async_fan_cap_reached(self, _now: datetime) -> None:
+        """Max-hours cap for Fan On reached."""
+        self._fan_cap_cancel = None
+        self.hass.async_create_task(self._async_revert_fan_to_auto("max_hours"))
+
+    @callback
+    def _async_clear_fan_revert(self) -> None:
+        """Clear all Fan On revert tracking."""
+        if self._fan_cap_cancel:
+            self._fan_cap_cancel()
+            self._fan_cap_cancel = None
+        self._fan_on_since = None
+        self._fan_on_until = None
+        self._fan_revert_reason = "none"
+
+    async def _async_revert_fan_to_auto(self, reason: str) -> None:
+        """Return Fan On to Auto (schedule change, Away, or max-hours cap)."""
+        if self._user_fan_mode != "on":
+            return
+        _LOGGER.info("[TEST LOG][FAN] Fan On returned to Auto. Reason: %s.", reason)
+        self._user_fan_mode = "auto"
+        self._async_clear_fan_revert()
+        if self._fan_entity and self._hvac_action not in (HVACAction.COOLING, HVACAction.HEATING):
+            await self._async_service("fan", "turn_off", {ATTR_ENTITY_ID: self._fan_entity}, context=Context())
         self.async_write_ha_state()
 
     @property
@@ -466,6 +559,12 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
             "cooling_offset": self._cooling_offset,
             "heating_offset": self._heating_offset,
             "min_cycle_duration_minutes": self._min_cycle_duration,
+            "blower_running": self._user_fan_mode == "on"
+            or self._hvac_action in (HVACAction.COOLING, HVACAction.HEATING),
+            "fan_on_since": self._fan_on_since.isoformat() if self._fan_on_since else None,
+            "fan_on_until": self._fan_on_until.isoformat() if self._fan_on_until else None,
+            "fan_revert_reason": self._fan_revert_reason,
+            "fan_on_max_hours": self._fan_on_max_hours,
         }
 
     # --------------------------------------------------------------------------
@@ -496,6 +595,10 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
             saved_fan_mode = last_state.attributes.get("fan_mode")
             if saved_fan_mode in ("on", "auto"):
                 self._user_fan_mode = saved_fan_mode
+            if self._user_fan_mode == "on":
+                saved_since = last_state.attributes.get("fan_on_since")
+                parsed_since = dt_util.parse_datetime(saved_since) if isinstance(saved_since, str) else None
+                self._fan_on_since = dt_util.as_utc(parsed_since) if parsed_since else dt_util.utcnow()
 
             # 1. Restore Preset Mode FIRST
             prev_preset = last_state.attributes.get("preset_mode")
@@ -665,6 +768,17 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                 self._async_sync_schedule_to_current_time()
 
             await self._async_evaluate_regulation()
+
+            # Fan On: re-arm the revert plan, or revert now if its time passed while HA was offline
+            if self._fan_entity and self._user_fan_mode == "on":
+                self._async_plan_fan_revert()
+                if self._fan_on_until and self._fan_on_until <= dt_util.utcnow():
+                    await self._async_revert_fan_to_auto(
+                        f"{self._fan_revert_reason} time passed while Home Assistant was offline"
+                    )
+                else:
+                    self.async_write_ha_state()
+
             self._log_telemetry_snapshot("Startup Initialization")
             self._is_starting_up = False
 
@@ -683,6 +797,10 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
         if self._immunity_timer_cancel:
             self._immunity_timer_cancel()
             self._immunity_timer_cancel = None
+
+        if self._fan_cap_cancel:
+            self._fan_cap_cancel()
+            self._fan_cap_cancel = None
 
         await super().async_will_remove_from_hass()
 
@@ -847,6 +965,13 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
         old_preset = self._preset_mode
         self._preset_mode = preset_mode
 
+        # Fan On returns to Auto when the system switches to Away; otherwise re-plan (Vacation suspends the schedule)
+        if self._user_fan_mode == "on":
+            if preset_mode == PRESET_AWAY and old_preset != PRESET_AWAY:
+                await self._async_revert_fan_to_auto("away")
+            elif old_preset != preset_mode:
+                self._async_plan_fan_revert()
+
         # If entering Comfort mode, start 60-minute Away Immunity Window (Pre-Cooling)
         if preset_mode == PRESET_COMFORT:
             self._async_start_immunity_window()
@@ -977,15 +1102,14 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
         try:
             domain, service_name = service.split(".", 1)
             if domain == "persistent_notification":
-                await self.hass.services.async_call(
+                await self._async_service(
                     "persistent_notification",
                     "create",
                     {
                         "title": title,
                         "message": message,
                         "notification_id": f"{DOMAIN}_{notification_type}",
-                    },
-                    blocking=False,
+                    }
                 )
                 return
 
@@ -994,26 +1118,24 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                     "Notification target service '%s' is not registered in Home Assistant. Falling back to persistent notifications.",
                     service,
                 )
-                await self.hass.services.async_call(
+                await self._async_service(
                     "persistent_notification",
                     "create",
                     {
                         "title": title,
                         "message": message,
                         "notification_id": f"{DOMAIN}_{notification_type}",
-                    },
-                    blocking=False,
+                    }
                 )
                 return
 
-            await self.hass.services.async_call(
+            await self._async_service(
                 domain,
                 service_name,
                 {
                     "title": title,
                     "message": message,
-                },
-                blocking=False,
+                }
             )
         except Exception as err:
             _LOGGER.warning("Failed to dispatch %s notification via %s: %s", notification_type, service, err)
@@ -1169,6 +1291,10 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                 if self._last_scheduled_slot != slot_name:
                     _LOGGER.info("Schedule triggered: %s -> setting preset %s", slot_name, slot_preset)
                     self._last_scheduled_slot = slot_name
+
+                    # Fan On returns to Auto at the next scheduled slot (catch-up syncs don't count)
+                    if self._user_fan_mode == "on":
+                        await self._async_revert_fan_to_auto("schedule")
 
                     # Presence-Aware: If slot is Away but user is actually Home (e.g. sick day, holiday)
                     if slot_preset == PRESET_AWAY and self._is_presence_home():
@@ -1597,20 +1723,18 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                 pass
 
         if cur_mode != HVACMode.COOL or self._last_sent_physical_mode != HVACMode.COOL:
-            await self.hass.services.async_call(
+            await self._async_service(
                 "climate",
                 "set_hvac_mode",
-                {ATTR_ENTITY_ID: self._target_climate, "hvac_mode": HVACMode.COOL},
-                blocking=False,
+                {ATTR_ENTITY_ID: self._target_climate, "hvac_mode": HVACMode.COOL}
             )
             self._last_sent_physical_mode = HVACMode.COOL
 
         if cur_temp is None or abs(cur_temp - safe_target) >= 0.5 or (self._last_sent_target_temp is None or abs(self._last_sent_target_temp - safe_target) >= 0.5):
-            await self.hass.services.async_call(
+            await self._async_service(
                 "climate",
                 "set_temperature",
-                {ATTR_ENTITY_ID: self._target_climate, ATTR_TEMPERATURE: safe_target},
-                blocking=False,
+                {ATTR_ENTITY_ID: self._target_climate, ATTR_TEMPERATURE: safe_target}
             )
             self._last_sent_target_temp = safe_target
 
@@ -1630,20 +1754,18 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                 pass
 
         if cur_mode != HVACMode.HEAT or self._last_sent_physical_mode != HVACMode.HEAT:
-            await self.hass.services.async_call(
+            await self._async_service(
                 "climate",
                 "set_hvac_mode",
-                {ATTR_ENTITY_ID: self._target_climate, "hvac_mode": HVACMode.HEAT},
-                blocking=False,
+                {ATTR_ENTITY_ID: self._target_climate, "hvac_mode": HVACMode.HEAT}
             )
             self._last_sent_physical_mode = HVACMode.HEAT
 
         if cur_temp is None or abs(cur_temp - safe_target) >= 0.5 or (self._last_sent_target_temp is None or abs(self._last_sent_target_temp - safe_target) >= 0.5):
-            await self.hass.services.async_call(
+            await self._async_service(
                 "climate",
                 "set_temperature",
-                {ATTR_ENTITY_ID: self._target_climate, ATTR_TEMPERATURE: safe_target},
-                blocking=False,
+                {ATTR_ENTITY_ID: self._target_climate, ATTR_TEMPERATURE: safe_target}
             )
             self._last_sent_target_temp = safe_target
 
@@ -1694,20 +1816,18 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
             safe_target = max(60.0, min(85.0, round(target_temp, 1)))
         self._ignore_physical_target_until = dt_util.utcnow() + timedelta(seconds=15)
 
-        await self.hass.services.async_call(
+        await self._async_service(
             "climate",
             "set_hvac_mode",
-            {ATTR_ENTITY_ID: self._target_climate, "hvac_mode": desired_mode},
-            blocking=False,
+            {ATTR_ENTITY_ID: self._target_climate, "hvac_mode": desired_mode}
         )
         self._last_sent_physical_mode = desired_mode
 
         if desired_mode != HVACMode.OFF:
-            await self.hass.services.async_call(
+            await self._async_service(
                 "climate",
                 "set_temperature",
-                {ATTR_ENTITY_ID: self._target_climate, ATTR_TEMPERATURE: safe_target},
-                blocking=False,
+                {ATTR_ENTITY_ID: self._target_climate, ATTR_TEMPERATURE: safe_target}
             )
             self._last_sent_target_temp = safe_target
 
@@ -1718,11 +1838,10 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
         cur_mode = physical_state.state if physical_state else None
 
         if cur_mode != HVACMode.OFF or self._last_sent_physical_mode != HVACMode.OFF:
-            await self.hass.services.async_call(
+            await self._async_service(
                 "climate",
                 "set_hvac_mode",
-                {ATTR_ENTITY_ID: self._target_climate, "hvac_mode": HVACMode.OFF},
-                blocking=False,
+                {ATTR_ENTITY_ID: self._target_climate, "hvac_mode": HVACMode.OFF}
             )
             self._last_sent_physical_mode = HVACMode.OFF
 
@@ -1735,8 +1854,8 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                     self._fan_entity,
                     fan_state.state,
                 )
-                await self.hass.services.async_call(
-                    "fan", "turn_off", {ATTR_ENTITY_ID: self._fan_entity}, blocking=False
+                await self._async_service(
+                    "fan", "turn_off", {ATTR_ENTITY_ID: self._fan_entity}
                 )
 
     # --------------------------------------------------------------------------

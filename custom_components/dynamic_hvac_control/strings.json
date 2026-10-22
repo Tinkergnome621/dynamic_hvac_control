@@ -15,6 +15,18 @@
           "return_humidity_sensor": "Return Air / Input Humidity (Optional)",
           "supply_temp_sensor": "Supply Air / Output Plenum Temperature (Optional)",
           "supply_humidity_sensor": "Supply Air / Output Plenum Humidity (Optional)"
+        },
+        "data_description": {
+          "name": "Name shown for this thermostat in Home Assistant.",
+          "target_climate": "Your real wall thermostat that this integration controls.",
+          "temperature_sensor": "The room or whole-house average sensor the system regulates to.",
+          "humidity_sensor": "Optional indoor humidity reading shown on the card. It doesn't affect control.",
+          "fan_entity": "The thermostat's fan control, used for Fan On/Auto.",
+          "presence_sensor": "Person or tracker used for Away and errand logic.",
+          "return_temp_sensor": "Optional return-air temperature probe shown on the card. It doesn't affect control.",
+          "return_humidity_sensor": "Optional return-air humidity probe shown on the card. It doesn't affect control.",
+          "supply_temp_sensor": "Optional supply-air temperature probe shown on the card. It doesn't affect control.",
+          "supply_humidity_sensor": "Optional supply-air humidity probe shown on the card. It doesn't affect control."
         }
       },
       "presets": {
@@ -40,6 +52,27 @@
           "boost_heat": "Boost (Heat) °F",
           "vacation_cool": "Vacation (Cool) °F",
           "vacation_heat": "Vacation (Heat) °F"
+        },
+        "data_description": {
+          "cooling_swing": "How far above the target the house can warm before cooling starts.",
+          "heating_swing": "How far below the target the house can cool before heating starts.",
+          "cooling_offset": "How much lower than your target the wall thermostat is set while cooling, so it doesn't stop early.",
+          "heating_offset": "How much higher than your target the wall thermostat is set while heating. Keep it small to avoid heat-pump aux heat.",
+          "min_cycle_duration": "Shortest time the compressor must run, and must rest between runs, to prevent short-cycling.",
+          "errand_delay": "How long everyone must be gone before switching to Away, so quick trips don't change anything.",
+          "immunity_duration": "After a Comfort slot starts, how long presence is ignored so the house can cool before you arrive.",
+          "comfort_cool": "Target temperature used when Comfort is active while cooling.",
+          "comfort_heat": "Target temperature used when Comfort is active while heating.",
+          "eco_cool": "Target temperature used when Eco is active while cooling.",
+          "eco_heat": "Target temperature used when Eco is active while heating.",
+          "away_cool": "Target temperature used when Away is active while cooling.",
+          "away_heat": "Target temperature used when Away is active while heating.",
+          "sleep_cool": "Target temperature used when Sleep is active while cooling.",
+          "sleep_heat": "Target temperature used when Sleep is active while heating.",
+          "boost_cool": "Target temperature used when Boost is active while cooling.",
+          "boost_heat": "Target temperature used when Boost is active while heating.",
+          "vacation_cool": "Target temperature used when Vacation is active while cooling.",
+          "vacation_heat": "Target temperature used when Vacation is active while heating."
         }
       },
       "schedules": {
@@ -63,6 +96,25 @@
           "we_p3_preset": "Weekend Period 3 Preset",
           "we_p4_time": "Weekend Period 4 Time (Night/Sleep)",
           "we_p4_preset": "Weekend Period 4 Preset"
+        },
+        "data_description": {
+          "enable_schedule": "Turn the daily schedule on or off.",
+          "wd_p1_time": "When weekday slot 1 starts each day.",
+          "wd_p1_preset": "Which preset weekday slot 1 applies.",
+          "wd_p2_time": "When weekday slot 2 starts each day.",
+          "wd_p2_preset": "Which preset weekday slot 2 applies.",
+          "wd_p3_time": "When weekday slot 3 starts each day.",
+          "wd_p3_preset": "Which preset weekday slot 3 applies.",
+          "wd_p4_time": "When weekday slot 4 starts each day.",
+          "wd_p4_preset": "Which preset weekday slot 4 applies.",
+          "we_p1_time": "When weekend slot 1 starts each day.",
+          "we_p1_preset": "Which preset weekend slot 1 applies.",
+          "we_p2_time": "When weekend slot 2 starts each day.",
+          "we_p2_preset": "Which preset weekend slot 2 applies.",
+          "we_p3_time": "When weekend slot 3 starts each day.",
+          "we_p3_preset": "Which preset weekend slot 3 applies.",
+          "we_p4_time": "When weekend slot 4 starts each day.",
+          "we_p4_preset": "Which preset weekend slot 4 applies."
         }
       },
       "notifications": {
@@ -75,6 +127,14 @@
           "notify_schedule": "Notify on Scheduled Slot Transitions",
           "notify_presence": "Notify on Presence / Errand Changes (Away / Return)",
           "notify_sensor_fallback": "Notify on Sensor Fallback & Emergency Alerts"
+        },
+        "data_description": {
+          "notify_service": "Where alerts go, e.g. notify.mobile_app_yourphone.",
+          "notify_hvac_mode": "Send a notification when the system mode changes.",
+          "notify_preset": "Send a notification when the preset changes.",
+          "notify_schedule": "Send a notification when a schedule slot starts.",
+          "notify_presence": "Send a notification when Away or errand timers change.",
+          "notify_sensor_fallback": "Send a notification when a sensor goes offline and a backup is used."
         }
       }
     }
@@ -84,13 +144,15 @@
       "init": {
         "title": "Dynamic HVAC Control Settings",
         "menu_options": {
+          "save_and_close": "✓ Save and close",
           "temperatures": "Temperature Presets, Swings & Offsets",
           "sensors": "Sensors, Fan & Air Plenum Probes",
           "weekday_schedule": "Monday – Friday Schedule (4 Slots)",
           "weekend_schedule": "Saturday – Sunday Schedule (4 Slots)",
-          "presence_timers": "Errand Grace Delay & Away Immunity",
+          "presence_timers": "Presence, Timers & Fan Revert",
           "notifications": "Notification Triggers & Alerts"
-        }
+        },
+        "description": "Pick a section to edit. Changes are kept until you choose Save and close; closing with X discards them.\n\n{pending}"
       },
       "sensors": {
         "title": "Sensors, Fan & Air Plenum Probes",
@@ -104,6 +166,16 @@
           "return_humidity_sensor": "Return Air / Input Humidity (Optional)",
           "supply_temp_sensor": "Supply Air / Output Plenum Temperature (Optional)",
           "supply_humidity_sensor": "Supply Air / Output Plenum Humidity (Optional)"
+        },
+        "data_description": {
+          "temperature_sensor": "The room or whole-house average sensor the system regulates to.",
+          "humidity_sensor": "Optional indoor humidity reading shown on the card. It doesn't affect control.",
+          "fan_entity": "The thermostat's fan control, used for Fan On/Auto.",
+          "presence_sensor": "Person or tracker used for Away and errand logic.",
+          "return_temp_sensor": "Optional return-air temperature probe shown on the card. It doesn't affect control.",
+          "return_humidity_sensor": "Optional return-air humidity probe shown on the card. It doesn't affect control.",
+          "supply_temp_sensor": "Optional supply-air temperature probe shown on the card. It doesn't affect control.",
+          "supply_humidity_sensor": "Optional supply-air humidity probe shown on the card. It doesn't affect control."
         }
       },
       "temperatures": {
@@ -126,6 +198,24 @@
           "boost_heat": "Boost (Heat) °F",
           "vacation_cool": "Vacation (Cool) °F",
           "vacation_heat": "Vacation (Heat) °F"
+        },
+        "data_description": {
+          "cooling_swing": "How far above the target the house can warm before cooling starts.",
+          "heating_swing": "How far below the target the house can cool before heating starts.",
+          "cooling_offset": "How much lower than your target the wall thermostat is set while cooling, so it doesn't stop early.",
+          "heating_offset": "How much higher than your target the wall thermostat is set while heating. Keep it small to avoid heat-pump aux heat.",
+          "comfort_cool": "Target temperature used when Comfort is active while cooling.",
+          "comfort_heat": "Target temperature used when Comfort is active while heating.",
+          "eco_cool": "Target temperature used when Eco is active while cooling.",
+          "eco_heat": "Target temperature used when Eco is active while heating.",
+          "away_cool": "Target temperature used when Away is active while cooling.",
+          "away_heat": "Target temperature used when Away is active while heating.",
+          "sleep_cool": "Target temperature used when Sleep is active while cooling.",
+          "sleep_heat": "Target temperature used when Sleep is active while heating.",
+          "boost_cool": "Target temperature used when Boost is active while cooling.",
+          "boost_heat": "Target temperature used when Boost is active while heating.",
+          "vacation_cool": "Target temperature used when Vacation is active while cooling.",
+          "vacation_heat": "Target temperature used when Vacation is active while heating."
         }
       },
       "weekday_schedule": {
@@ -141,6 +231,17 @@
           "wd_p3_preset": "Period 3 Preset",
           "wd_p4_time": "Period 4 Time (Night/Sleep)",
           "wd_p4_preset": "Period 4 Preset"
+        },
+        "data_description": {
+          "enable_schedule": "Turn the daily schedule on or off.",
+          "wd_p1_time": "When weekday slot 1 starts each day.",
+          "wd_p1_preset": "Which preset weekday slot 1 applies.",
+          "wd_p2_time": "When weekday slot 2 starts each day.",
+          "wd_p2_preset": "Which preset weekday slot 2 applies.",
+          "wd_p3_time": "When weekday slot 3 starts each day.",
+          "wd_p3_preset": "Which preset weekday slot 3 applies.",
+          "wd_p4_time": "When weekday slot 4 starts each day.",
+          "wd_p4_preset": "Which preset weekday slot 4 applies."
         }
       },
       "weekend_schedule": {
@@ -155,15 +256,32 @@
           "we_p3_preset": "Period 3 Preset",
           "we_p4_time": "Period 4 Time (Night/Sleep)",
           "we_p4_preset": "Period 4 Preset"
+        },
+        "data_description": {
+          "we_p1_time": "When weekend slot 1 starts each day.",
+          "we_p1_preset": "Which preset weekend slot 1 applies.",
+          "we_p2_time": "When weekend slot 2 starts each day.",
+          "we_p2_preset": "Which preset weekend slot 2 applies.",
+          "we_p3_time": "When weekend slot 3 starts each day.",
+          "we_p3_preset": "Which preset weekend slot 3 applies.",
+          "we_p4_time": "When weekend slot 4 starts each day.",
+          "we_p4_preset": "Which preset weekend slot 4 applies."
         }
       },
       "presence_timers": {
         "title": "Presence, Timers & Safety",
-        "description": "Adjust the errand grace period, pre-cooling away immunity, and compressor cycle protection.",
+        "description": "Adjust the errand grace period, pre-cooling away immunity, and compressor cycle protection. Fan On also returns to Auto at the next schedule change or when the system switches to Away.",
         "data": {
           "errand_delay": "Errand Grace Delay (Minutes before Away)",
           "immunity_duration": "Pre-Cooling Away Immunity (Minutes)",
-          "min_cycle_duration": "Minimum Compressor Cycle Time (Minutes)"
+          "min_cycle_duration": "Minimum Compressor Cycle Time (Minutes)",
+          "fan_on_max_hours": "Fan On Max Hours (0 = no limit)"
+        },
+        "data_description": {
+          "errand_delay": "How long everyone must be gone before switching to Away, so quick trips don't change anything.",
+          "immunity_duration": "After a Comfort slot starts, how long presence is ignored so the house can cool before you arrive.",
+          "min_cycle_duration": "Shortest time the compressor must run, and must rest between runs, to prevent short-cycling.",
+          "fan_on_max_hours": "Backup limit before Fan On returns to Auto when no schedule change occurs. 0 = no limit."
         }
       },
       "notifications": {
@@ -176,6 +294,14 @@
           "notify_schedule": "Notify on Scheduled Slot Transitions",
           "notify_presence": "Notify on Presence / Errand Changes (Away / Return)",
           "notify_sensor_fallback": "Notify on Sensor Fallback & Emergency Alerts"
+        },
+        "data_description": {
+          "notify_service": "Where alerts go, e.g. notify.mobile_app_yourphone.",
+          "notify_hvac_mode": "Send a notification when the system mode changes.",
+          "notify_preset": "Send a notification when the preset changes.",
+          "notify_schedule": "Send a notification when a schedule slot starts.",
+          "notify_presence": "Send a notification when Away or errand timers change.",
+          "notify_sensor_fallback": "Send a notification when a sensor goes offline and a backup is used."
         }
       }
     }

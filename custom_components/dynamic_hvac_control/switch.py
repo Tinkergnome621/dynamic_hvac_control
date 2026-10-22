@@ -65,6 +65,7 @@ class DynamicHvacVacationSwitch(SwitchEntity):
         """Turn on Vacation Mode."""
         climate_entity = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {}).get("climate_entity")
         if climate_entity:
+            climate_entity.async_set_context(self._context)
             await climate_entity.async_set_preset_mode("vacation", reason="Vacation Mode switch turned ON")
         self.async_write_ha_state()
 
@@ -72,6 +73,7 @@ class DynamicHvacVacationSwitch(SwitchEntity):
         """Turn off Vacation Mode and resume normal scheduled preset."""
         climate_entity = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {}).get("climate_entity")
         if climate_entity:
+            climate_entity.async_set_context(self._context)
             _LOGGER.info("[TEST LOG][STATE CHANGE] Vacation Mode switch turned OFF. Resuming normal schedule.")
             await climate_entity.async_resume_schedule()
         self.async_write_ha_state()

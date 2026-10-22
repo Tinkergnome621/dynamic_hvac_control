@@ -9,6 +9,8 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_FAN_ON_MAX_HOURS,
+    DEFAULT_FAN_ON_MAX_HOURS,
     DOMAIN,
     CONF_TARGET_CLIMATE,
     CONF_FAN_ENTITY,
@@ -290,17 +292,28 @@ class DynamicHvacControlOptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self) -> None:
         """Initialize options flow."""
-        self._options: dict[str, Any] = {}
+        self._options: dict[str, Any] | None = None
+        self._dirty = False
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Menu for options."""
-        self._options = {**self.config_entry.data, **self.config_entry.options}
+        """Main settings menu. Sections return here; nothing is saved until Save and close."""
+        if self._options is None:
+            self._options = {**self.config_entry.data, **self.config_entry.options}
         return self.async_show_menu(
             step_id="init",
-            menu_options=["temperatures", "sensors", "weekday_schedule", "weekend_schedule", "presence_timers", "notifications"],
+            menu_options=["save_and_close", "temperatures", "sensors", "weekday_schedule", "weekend_schedule", "presence_timers", "notifications"],
+            description_placeholders={
+                "pending": "You have unsaved changes." if self._dirty else "No unsaved changes."
+            },
         )
+
+    async def async_step_save_and_close(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Save all pending section changes and close the dialog."""
+        return self.async_create_entry(title="", data=self._options or {})
 
     async def async_step_sensors(
         self, user_input: dict[str, Any] | None = None
@@ -326,7 +339,8 @@ class DynamicHvacControlOptionsFlow(config_entries.OptionsFlow):
                 else:
                     self._options[conf_key] = val
             self._options.update(user_input)
-            return self.async_create_entry(title="", data=self._options)
+            self._dirty = True
+            return await self.async_step_init()
 
         cfg = self._options
         schema_dict: dict[Any, Any] = {
@@ -357,7 +371,8 @@ class DynamicHvacControlOptionsFlow(config_entries.OptionsFlow):
         """Modify temperature setpoints, swings, and offsets."""
         if user_input is not None:
             self._options.update(user_input)
-            return self.async_create_entry(title="", data=self._options)
+            self._dirty = True
+            return await self.async_step_init()
 
         cfg = self._options
         schema = vol.Schema(
@@ -388,7 +403,8 @@ class DynamicHvacControlOptionsFlow(config_entries.OptionsFlow):
         """Modify Monday – Friday 4-Slot Schedule."""
         if user_input is not None:
             self._options.update(user_input)
-            return self.async_create_entry(title="", data=self._options)
+            self._dirty = True
+            return await self.async_step_init()
 
         cfg = self._options
         schema = vol.Schema(
@@ -420,7 +436,8 @@ class DynamicHvacControlOptionsFlow(config_entries.OptionsFlow):
         """Modify Saturday – Sunday 4-Slot Schedule."""
         if user_input is not None:
             self._options.update(user_input)
-            return self.async_create_entry(title="", data=self._options)
+            self._dirty = True
+            return await self.async_step_init()
 
         cfg = self._options
         schema = vol.Schema(
@@ -451,7 +468,8 @@ class DynamicHvacControlOptionsFlow(config_entries.OptionsFlow):
         """Modify Errand Grace Delay, Away Immunity Window, and Compressor Safety."""
         if user_input is not None:
             self._options.update(user_input)
-            return self.async_create_entry(title="", data=self._options)
+            self._dirty = True
+            return await self.async_step_init()
 
         cfg = self._options
         schema = vol.Schema(
@@ -459,6 +477,7 @@ class DynamicHvacControlOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_ERRAND_DELAY, default=cfg.get(CONF_ERRAND_DELAY, DEFAULT_ERRAND_DELAY)): vol.Coerce(int),
                 vol.Required(CONF_IMMUNITY_DURATION, default=cfg.get(CONF_IMMUNITY_DURATION, DEFAULT_IMMUNITY_DURATION)): vol.Coerce(int),
                 vol.Required(CONF_MIN_CYCLE_DURATION, default=cfg.get(CONF_MIN_CYCLE_DURATION, DEFAULT_MIN_CYCLE_DURATION)): vol.Coerce(int),
+                vol.Required(CONF_FAN_ON_MAX_HOURS, default=cfg.get(CONF_FAN_ON_MAX_HOURS, DEFAULT_FAN_ON_MAX_HOURS)): vol.All(vol.Coerce(int), vol.Range(min=0, max=24)),
             }
         )
         return self.async_show_form(step_id="presence_timers", data_schema=schema)
@@ -472,7 +491,8 @@ class DynamicHvacControlOptionsFlow(config_entries.OptionsFlow):
             if service and "." not in service:
                 user_input[CONF_NOTIFY_SERVICE] = f"notify.{service}"
             self._options.update(user_input)
-            return self.async_create_entry(title="", data=self._options)
+            self._dirty = True
+            return await self.async_step_init()
 
         cfg = self._options
         schema = vol.Schema(

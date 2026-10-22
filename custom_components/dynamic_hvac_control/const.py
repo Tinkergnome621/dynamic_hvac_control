@@ -22,6 +22,7 @@ CONF_HEATING_SWING = "heating_swing"
 CONF_COOLING_OFFSET = "cooling_offset"
 CONF_HEATING_OFFSET = "heating_offset"
 CONF_ERRAND_DELAY = "errand_delay"
+CONF_FAN_ON_MAX_HOURS = "fan_on_max_hours"
 CONF_IMMUNITY_DURATION = "immunity_duration"
 CONF_MIN_CYCLE_DURATION = "min_cycle_duration"  # Minimum on/off time for compressor
 
@@ -80,6 +81,7 @@ DEFAULT_HEATING_OFFSET = 1.0  # Safe offset for heat pumps (<3°F prevents aux h
 DEFAULT_ERRAND_DELAY = 60  # minutes
 DEFAULT_IMMUNITY_DURATION = 60  # minutes
 DEFAULT_MIN_CYCLE_DURATION = 5  # minutes (compressor protection)
+DEFAULT_FAN_ON_MAX_HOURS = 4  # hours before Fan On falls back to Auto (0 = no cap)
 
 # Defaults - Temperatures
 DEFAULT_COMFORT_COOL = 72.0
