@@ -2206,22 +2206,29 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
         if new_state.state == HVACMode.OFF or self._hvac_mode == HVACMode.OFF:
             return
 
-        # STRICT SAFETY GUARD B: Echo suppression window (reject echoes of our own recent commands)
-        now = dt_util.utcnow()
-        if self._ignore_physical_target_until and now < self._ignore_physical_target_until:
-            return
-
         target_temp = new_state.attributes.get(ATTR_TEMPERATURE)
         if target_temp is not None:
             try:
                 new_target = float(target_temp)
 
-                # STRICT SAFETY GUARD C: Reject frost-guard or out-of-range temperatures (<60°F or >85°F)
+                # STRICT SAFETY GUARD B: Reject frost-guard or out-of-range temperatures (<60°F or >85°F)
                 if new_target < 60.0 or new_target > 85.0:
                     _LOGGER.debug(
                         "Ignoring physical thermostat target %.1f°F outside safe residential range (60-85°F).",
                         new_target,
                     )
+                    return
+
+                # STRICT SAFETY GUARD C: Echo suppression window
+                # Inside the window, only ignore a reported value within 0.5°F of _last_sent_target_temp (that's our own echo).
+                # Any value >= 1.0°F away from both _last_sent_target_temp and _physical_last_reported_target is a real user press.
+                now = dt_util.utcnow()
+                if (
+                    self._ignore_physical_target_until
+                    and now < self._ignore_physical_target_until
+                    and self._last_sent_target_temp is not None
+                    and abs(new_target - self._last_sent_target_temp) <= 0.5
+                ):
                     return
 
                 # Genuine user adjustment check (must differ by at least 1.0°F from sent and reported to reject rounding jitter)
