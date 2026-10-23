@@ -30,49 +30,51 @@
         }
       },
       "presets": {
-        "title": "Setpoints, Swings & Offsets",
-        "description": "Configure your default temperatures, swings, offsets, and vacation hold targets.",
+        "title": "Setpoints, Deadband, Swings & Offsets",
+        "description": "Comfort and Sleep hold one target. Eco, Away and Vacation let the house drift between a floor and a ceiling. Boost pushes hard one way.",
         "data": {
           "cooling_swing": "Cooling Swing (°F)",
           "heating_swing": "Heating Swing (°F)",
-          "cooling_offset": "Cooling Dynamic Offset (°F - default: 3.0)",
-          "heating_offset": "Heating Dynamic Offset (°F - default: 1.0 for Heat Pump Aux protection)",
-          "min_cycle_duration": "Minimum Compressor Cycle Time (Minutes - default: 5)",
-          "errand_delay": "Errand Grace Delay (Minutes before Away)",
-          "immunity_duration": "Pre-Cooling Away Immunity (Minutes)",
-          "comfort_cool": "Comfort (Cool) °F",
-          "comfort_heat": "Comfort (Heat) °F",
-          "eco_cool": "Eco (Cool) °F",
-          "eco_heat": "Eco (Heat) °F",
-          "away_cool": "Away (Cool) °F",
-          "away_heat": "Away (Heat) °F",
-          "sleep_cool": "Sleep (Cool) °F",
-          "sleep_heat": "Sleep (Heat) °F",
-          "boost_cool": "Boost (Cool) °F",
+          "cooling_offset": "Cooling Dynamic Offset (°F)",
+          "heating_offset": "Heating Dynamic Offset (°F)",
+          "comfort_target": "Comfort Target °F",
+          "sleep_target": "Sleep Target °F",
+          "heat_cool_lower_buffer": "Heat/Cool Lower Buffer (°F, min 3)",
+          "heat_cool_upper_buffer": "Heat/Cool Upper Buffer (°F, min 3)",
+          "eco_heat": "Eco Floor (Heat below) °F",
+          "eco_cool": "Eco Ceiling (Cool above) °F",
+          "away_heat": "Away Floor (Heat below) °F",
+          "away_cool": "Away Ceiling (Cool above) °F",
+          "vacation_heat": "Vacation Floor (Heat below) °F",
+          "vacation_cool": "Vacation Ceiling (Cool above) °F",
           "boost_heat": "Boost (Heat) °F",
-          "vacation_cool": "Vacation (Cool) °F",
-          "vacation_heat": "Vacation (Heat) °F"
+          "boost_cool": "Boost (Cool) °F",
+          "min_cycle_duration": "Minimum Compressor Cycle Time (Minutes - default: 5)",
+          "changeover_delay": "Heat/Cool Changeover Wait (Minutes)",
+          "errand_delay": "Errand Grace Delay (Minutes before Away)",
+          "immunity_duration": "Pre-Cooling Away Immunity (Minutes)"
         },
         "data_description": {
-          "cooling_swing": "How far above the target the house can warm before cooling starts.",
-          "heating_swing": "How far below the target the house can cool before heating starts.",
+          "cooling_swing": "How far above the target the house can warm before cooling starts (Cool mode and range presets).",
+          "heating_swing": "How far below the target the house can cool before heating starts (Heat mode and range presets).",
           "cooling_offset": "How much lower than your target the wall thermostat is set while cooling, so it doesn't stop early.",
           "heating_offset": "How much higher than your target the wall thermostat is set while heating. Keep it small to avoid heat-pump aux heat.",
+          "comfort_target": "The one temperature Comfort holds. In Heat/Cool, heat or cool starts a buffer away and stops back at this target.",
+          "sleep_target": "The one temperature Sleep holds, with the same Heat/Cool deadband as Comfort.",
+          "heat_cool_lower_buffer": "In Heat/Cool, how far below the target heating starts. The card's orange knob also adjusts this.",
+          "heat_cool_upper_buffer": "In Heat/Cool, how far above the target cooling starts. The card's blue knob also adjusts this.",
+          "eco_heat": "Eco lets the house drift: heats only below this floor. Heat mode uses this value.",
+          "eco_cool": "Eco cools only above this ceiling. Cool mode uses this value. Must be at least 3° above the floor.",
+          "away_heat": "Away heats only below this floor. Heat mode uses this value.",
+          "away_cool": "Away cools only above this ceiling. Cool mode uses this value.",
+          "vacation_heat": "Vacation heats only below this floor. Heat mode uses this value.",
+          "vacation_cool": "Vacation cools only above this ceiling. Cool mode uses this value.",
+          "boost_heat": "Temperature Boost heats toward.",
+          "boost_cool": "Temperature Boost cools toward.",
           "min_cycle_duration": "Shortest time the compressor must run, and must rest between runs, to prevent short-cycling.",
+          "changeover_delay": "In Heat/Cool, the minimum rest between a heating run and a cooling run (either way). Default 20.",
           "errand_delay": "How long everyone must be gone before switching to Away, so quick trips don't change anything.",
-          "immunity_duration": "After a Comfort slot starts, how long presence is ignored so the house can cool before you arrive.",
-          "comfort_cool": "Target temperature used when Comfort is active while cooling.",
-          "comfort_heat": "Target temperature used when Comfort is active while heating.",
-          "eco_cool": "Target temperature used when Eco is active while cooling.",
-          "eco_heat": "Target temperature used when Eco is active while heating.",
-          "away_cool": "Target temperature used when Away is active while cooling.",
-          "away_heat": "Target temperature used when Away is active while heating.",
-          "sleep_cool": "Target temperature used when Sleep is active while cooling.",
-          "sleep_heat": "Target temperature used when Sleep is active while heating.",
-          "boost_cool": "Target temperature used when Boost is active while cooling.",
-          "boost_heat": "Target temperature used when Boost is active while heating.",
-          "vacation_cool": "Target temperature used when Vacation is active while cooling.",
-          "vacation_heat": "Target temperature used when Vacation is active while heating."
+          "immunity_duration": "After a Comfort slot starts, how long presence is ignored so the house can cool before you arrive."
         }
       },
       "schedules": {
@@ -137,6 +139,9 @@
           "notify_sensor_fallback": "Send a notification when a sensor goes offline and a backup is used."
         }
       }
+    },
+    "error": {
+      "range_gap": "The ceiling must be at least 3°F above the floor."
     }
   },
   "options": {
@@ -179,43 +184,43 @@
         }
       },
       "temperatures": {
-        "title": "Temperature Presets, Swings & Offsets",
-        "description": "Adjust your setpoints, hysteresis swings, offsets, or vacation temperatures.",
+        "title": "Presets, Deadband, Swings & Offsets",
+        "description": "Comfort and Sleep hold one target. Eco, Away and Vacation let the house drift between a floor and a ceiling. Boost pushes hard one way.",
         "data": {
           "cooling_swing": "Cooling Swing (°F)",
           "heating_swing": "Heating Swing (°F)",
           "cooling_offset": "Cooling Dynamic Offset (°F)",
           "heating_offset": "Heating Dynamic Offset (°F)",
-          "comfort_cool": "Comfort (Cool) °F",
-          "comfort_heat": "Comfort (Heat) °F",
-          "eco_cool": "Eco (Cool) °F",
-          "eco_heat": "Eco (Heat) °F",
-          "away_cool": "Away (Cool) °F",
-          "away_heat": "Away (Heat) °F",
-          "sleep_cool": "Sleep (Cool) °F",
-          "sleep_heat": "Sleep (Heat) °F",
-          "boost_cool": "Boost (Cool) °F",
+          "comfort_target": "Comfort Target °F",
+          "sleep_target": "Sleep Target °F",
+          "heat_cool_lower_buffer": "Heat/Cool Lower Buffer (°F, min 3)",
+          "heat_cool_upper_buffer": "Heat/Cool Upper Buffer (°F, min 3)",
+          "eco_heat": "Eco Floor (Heat below) °F",
+          "eco_cool": "Eco Ceiling (Cool above) °F",
+          "away_heat": "Away Floor (Heat below) °F",
+          "away_cool": "Away Ceiling (Cool above) °F",
+          "vacation_heat": "Vacation Floor (Heat below) °F",
+          "vacation_cool": "Vacation Ceiling (Cool above) °F",
           "boost_heat": "Boost (Heat) °F",
-          "vacation_cool": "Vacation (Cool) °F",
-          "vacation_heat": "Vacation (Heat) °F"
+          "boost_cool": "Boost (Cool) °F"
         },
         "data_description": {
-          "cooling_swing": "How far above the target the house can warm before cooling starts.",
-          "heating_swing": "How far below the target the house can cool before heating starts.",
+          "cooling_swing": "How far above the target the house can warm before cooling starts (Cool mode and range presets).",
+          "heating_swing": "How far below the target the house can cool before heating starts (Heat mode and range presets).",
           "cooling_offset": "How much lower than your target the wall thermostat is set while cooling, so it doesn't stop early.",
           "heating_offset": "How much higher than your target the wall thermostat is set while heating. Keep it small to avoid heat-pump aux heat.",
-          "comfort_cool": "Target temperature used when Comfort is active while cooling.",
-          "comfort_heat": "Target temperature used when Comfort is active while heating.",
-          "eco_cool": "Target temperature used when Eco is active while cooling.",
-          "eco_heat": "Target temperature used when Eco is active while heating.",
-          "away_cool": "Target temperature used when Away is active while cooling.",
-          "away_heat": "Target temperature used when Away is active while heating.",
-          "sleep_cool": "Target temperature used when Sleep is active while cooling.",
-          "sleep_heat": "Target temperature used when Sleep is active while heating.",
-          "boost_cool": "Target temperature used when Boost is active while cooling.",
-          "boost_heat": "Target temperature used when Boost is active while heating.",
-          "vacation_cool": "Target temperature used when Vacation is active while cooling.",
-          "vacation_heat": "Target temperature used when Vacation is active while heating."
+          "comfort_target": "The one temperature Comfort holds. In Heat/Cool, heat or cool starts a buffer away and stops back at this target.",
+          "sleep_target": "The one temperature Sleep holds, with the same Heat/Cool deadband as Comfort.",
+          "heat_cool_lower_buffer": "In Heat/Cool, how far below the target heating starts. The card's orange knob also adjusts this.",
+          "heat_cool_upper_buffer": "In Heat/Cool, how far above the target cooling starts. The card's blue knob also adjusts this.",
+          "eco_heat": "Eco lets the house drift: heats only below this floor. Heat mode uses this value.",
+          "eco_cool": "Eco cools only above this ceiling. Cool mode uses this value. Must be at least 3° above the floor.",
+          "away_heat": "Away heats only below this floor. Heat mode uses this value.",
+          "away_cool": "Away cools only above this ceiling. Cool mode uses this value.",
+          "vacation_heat": "Vacation heats only below this floor. Heat mode uses this value.",
+          "vacation_cool": "Vacation cools only above this ceiling. Cool mode uses this value.",
+          "boost_heat": "Temperature Boost heats toward.",
+          "boost_cool": "Temperature Boost cools toward."
         }
       },
       "weekday_schedule": {
@@ -270,17 +275,19 @@
       },
       "presence_timers": {
         "title": "Presence, Timers & Safety",
-        "description": "Adjust the errand grace period, pre-cooling away immunity, and compressor cycle protection. Fan On also returns to Auto at the next schedule change or when the system switches to Away.",
+        "description": "Adjust the errand grace period, pre-cooling away immunity, compressor cycle protection, and the heat/cool changeover wait. Fan On also returns to Auto at the next schedule change or when the system switches to Away.",
         "data": {
           "errand_delay": "Errand Grace Delay (Minutes before Away)",
           "immunity_duration": "Pre-Cooling Away Immunity (Minutes)",
           "min_cycle_duration": "Minimum Compressor Cycle Time (Minutes)",
+          "changeover_delay": "Heat/Cool Changeover Wait (Minutes)",
           "fan_on_max_hours": "Fan On Max Hours (0 = no limit)"
         },
         "data_description": {
           "errand_delay": "How long everyone must be gone before switching to Away, so quick trips don't change anything.",
           "immunity_duration": "After a Comfort slot starts, how long presence is ignored so the house can cool before you arrive.",
           "min_cycle_duration": "Shortest time the compressor must run, and must rest between runs, to prevent short-cycling.",
+          "changeover_delay": "In Heat/Cool, the minimum rest between a heating run and a cooling run (either way). Default 20.",
           "fan_on_max_hours": "Backup limit before Fan On returns to Auto when no schedule change occurs. 0 = no limit."
         }
       },
@@ -304,6 +311,9 @@
           "notify_sensor_fallback": "Send a notification when a sensor goes offline and a backup is used."
         }
       }
+    },
+    "error": {
+      "range_gap": "The ceiling must be at least 3°F above the floor."
     }
   }
 }

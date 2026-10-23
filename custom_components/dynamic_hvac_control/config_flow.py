@@ -9,6 +9,19 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_CHANGEOVER_DELAY,
+    CONF_COMFORT_TARGET,
+    CONF_HC_LOWER_BUFFER,
+    CONF_HC_UPPER_BUFFER,
+    CONF_SLEEP_TARGET,
+    DEFAULT_CHANGEOVER_DELAY,
+    DEFAULT_COMFORT_TARGET,
+    DEFAULT_HC_LOWER_BUFFER,
+    DEFAULT_HC_UPPER_BUFFER,
+    DEFAULT_SLEEP_TARGET,
+    MAX_HC_BUFFER,
+    MIN_HC_BUFFER,
+    MIN_RANGE_GAP,
     CONF_FAN_ON_MAX_HOURS,
     DEFAULT_FAN_ON_MAX_HOURS,
     DOMAIN,
@@ -116,10 +129,55 @@ PRESET_OPTIONS = [
 ]
 
 
+TEMP = vol.All(vol.Coerce(float), vol.Range(min=60, max=85))
+BUFFER = vol.All(vol.Coerce(float), vol.Range(min=MIN_HC_BUFFER, max=MAX_HC_BUFFER))
+RANGE_PAIRS = [
+    (CONF_ECO_HEAT, CONF_ECO_COOL),
+    (CONF_AWAY_HEAT, CONF_AWAY_COOL),
+    (CONF_VACATION_HEAT, CONF_VACATION_COOL),
+]
+
+
+def _setpoint_fields(cfg: dict[str, Any]) -> dict[Any, Any]:
+    """Swings, offsets, target presets, range presets (floor/ceiling), Boost and Heat/Cool buffers."""
+    def req(key: str, default: Any, validator: Any) -> tuple[Any, Any]:
+        return vol.Required(key, default=cfg.get(key, default)), validator
+
+    fields = [
+        req(CONF_COOLING_SWING, DEFAULT_COOLING_SWING, vol.Coerce(float)),
+        req(CONF_HEATING_SWING, DEFAULT_HEATING_SWING, vol.Coerce(float)),
+        req(CONF_COOLING_OFFSET, DEFAULT_COOLING_OFFSET, vol.Coerce(float)),
+        req(CONF_HEATING_OFFSET, DEFAULT_HEATING_OFFSET, vol.Coerce(float)),
+        req(CONF_COMFORT_TARGET, DEFAULT_COMFORT_TARGET, TEMP),
+        req(CONF_SLEEP_TARGET, DEFAULT_SLEEP_TARGET, TEMP),
+        req(CONF_HC_LOWER_BUFFER, DEFAULT_HC_LOWER_BUFFER, BUFFER),
+        req(CONF_HC_UPPER_BUFFER, DEFAULT_HC_UPPER_BUFFER, BUFFER),
+        req(CONF_ECO_HEAT, DEFAULT_ECO_HEAT, TEMP),
+        req(CONF_ECO_COOL, DEFAULT_ECO_COOL, TEMP),
+        req(CONF_AWAY_HEAT, DEFAULT_AWAY_HEAT, TEMP),
+        req(CONF_AWAY_COOL, DEFAULT_AWAY_COOL, TEMP),
+        req(CONF_VACATION_HEAT, DEFAULT_VACATION_HEAT, TEMP),
+        req(CONF_VACATION_COOL, DEFAULT_VACATION_COOL, TEMP),
+        req(CONF_BOOST_HEAT, DEFAULT_BOOST_HEAT, TEMP),
+        req(CONF_BOOST_COOL, DEFAULT_BOOST_COOL, TEMP),
+    ]
+    return dict(fields)
+
+
+def _validate_setpoints(user_input: dict[str, Any]) -> dict[str, str]:
+    """Each range preset's ceiling must sit at least MIN_RANGE_GAP above its floor."""
+    errors: dict[str, str] = {}
+    for floor_key, ceiling_key in RANGE_PAIRS:
+        if floor_key in user_input and ceiling_key in user_input:
+            if float(user_input[ceiling_key]) - float(user_input[floor_key]) < MIN_RANGE_GAP:
+                errors[ceiling_key] = "range_gap"
+    return errors
+
+
 class DynamicHvacControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Dynamic HVAC Control."""
 
-    VERSION = 2
+    VERSION = 3
 
     def __init__(self) -> None:
         """Initialize flow."""
@@ -171,36 +229,26 @@ class DynamicHvacControlConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_presets(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Step 2: Base temperature setpoints, swings, and offsets."""
+        """Step 2: Setpoints, deadband, swings, offsets and timers."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._data.update(user_input)
-            return await self.async_step_schedules()
+            errors = _validate_setpoints(user_input)
+            if not errors:
+                self._data.update(user_input)
+                return await self.async_step_schedules()
 
-        schema = vol.Schema(
+        cfg = {**self._data, **(user_input or {})}
+        fields = _setpoint_fields(cfg)
+        fields.update(
             {
-                vol.Required(CONF_COOLING_SWING, default=DEFAULT_COOLING_SWING): vol.Coerce(float),
-                vol.Required(CONF_HEATING_SWING, default=DEFAULT_HEATING_SWING): vol.Coerce(float),
-                vol.Required(CONF_COOLING_OFFSET, default=DEFAULT_COOLING_OFFSET): vol.Coerce(float),
-                vol.Required(CONF_HEATING_OFFSET, default=DEFAULT_HEATING_OFFSET): vol.Coerce(float),
-                vol.Required(CONF_MIN_CYCLE_DURATION, default=DEFAULT_MIN_CYCLE_DURATION): vol.Coerce(int),
-                vol.Required(CONF_ERRAND_DELAY, default=DEFAULT_ERRAND_DELAY): vol.Coerce(int),
-                vol.Required(CONF_IMMUNITY_DURATION, default=DEFAULT_IMMUNITY_DURATION): vol.Coerce(int),
-                vol.Required(CONF_COMFORT_COOL, default=DEFAULT_COMFORT_COOL): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_COMFORT_HEAT, default=DEFAULT_COMFORT_HEAT): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_ECO_COOL, default=DEFAULT_ECO_COOL): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_ECO_HEAT, default=DEFAULT_ECO_HEAT): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_AWAY_COOL, default=DEFAULT_AWAY_COOL): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_AWAY_HEAT, default=DEFAULT_AWAY_HEAT): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_SLEEP_COOL, default=DEFAULT_SLEEP_COOL): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_SLEEP_HEAT, default=DEFAULT_SLEEP_HEAT): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_BOOST_COOL, default=DEFAULT_BOOST_COOL): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_BOOST_HEAT, default=DEFAULT_BOOST_HEAT): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_VACATION_COOL, default=DEFAULT_VACATION_COOL): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_VACATION_HEAT, default=DEFAULT_VACATION_HEAT): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
+                vol.Required(CONF_MIN_CYCLE_DURATION, default=cfg.get(CONF_MIN_CYCLE_DURATION, DEFAULT_MIN_CYCLE_DURATION)): vol.Coerce(int),
+                vol.Required(CONF_CHANGEOVER_DELAY, default=cfg.get(CONF_CHANGEOVER_DELAY, DEFAULT_CHANGEOVER_DELAY)): vol.All(vol.Coerce(int), vol.Range(min=5, max=60)),
+                vol.Required(CONF_ERRAND_DELAY, default=cfg.get(CONF_ERRAND_DELAY, DEFAULT_ERRAND_DELAY)): vol.Coerce(int),
+                vol.Required(CONF_IMMUNITY_DURATION, default=cfg.get(CONF_IMMUNITY_DURATION, DEFAULT_IMMUNITY_DURATION)): vol.Coerce(int),
             }
         )
-
-        return self.async_show_form(step_id="presets", data_schema=schema)
+        schema = vol.Schema(fields)
+        return self.async_show_form(step_id="presets", data_schema=schema, errors=errors)
 
     async def async_step_schedules(
         self, user_input: dict[str, Any] | None = None
@@ -368,34 +416,17 @@ class DynamicHvacControlOptionsFlow(config_entries.OptionsFlow):
     async def async_step_temperatures(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Modify temperature setpoints, swings, and offsets."""
+        """Modify setpoints, deadband buffers, swings, and offsets."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._options.update(user_input)
-            self._dirty = True
-            return await self.async_step_init()
+            errors = _validate_setpoints(user_input)
+            if not errors:
+                self._options.update(user_input)
+                self._dirty = True
+                return await self.async_step_init()
 
-        cfg = self._options
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_COOLING_SWING, default=cfg.get(CONF_COOLING_SWING, DEFAULT_COOLING_SWING)): vol.Coerce(float),
-                vol.Required(CONF_HEATING_SWING, default=cfg.get(CONF_HEATING_SWING, DEFAULT_HEATING_SWING)): vol.Coerce(float),
-                vol.Required(CONF_COOLING_OFFSET, default=cfg.get(CONF_COOLING_OFFSET, DEFAULT_COOLING_OFFSET)): vol.Coerce(float),
-                vol.Required(CONF_HEATING_OFFSET, default=cfg.get(CONF_HEATING_OFFSET, DEFAULT_HEATING_OFFSET)): vol.Coerce(float),
-                vol.Required(CONF_COMFORT_COOL, default=cfg.get(CONF_COMFORT_COOL, DEFAULT_COMFORT_COOL)): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_COMFORT_HEAT, default=cfg.get(CONF_COMFORT_HEAT, DEFAULT_COMFORT_HEAT)): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_ECO_COOL, default=cfg.get(CONF_ECO_COOL, DEFAULT_ECO_COOL)): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_ECO_HEAT, default=cfg.get(CONF_ECO_HEAT, DEFAULT_ECO_HEAT)): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_AWAY_COOL, default=cfg.get(CONF_AWAY_COOL, DEFAULT_AWAY_COOL)): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_AWAY_HEAT, default=cfg.get(CONF_AWAY_HEAT, DEFAULT_AWAY_HEAT)): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_SLEEP_COOL, default=cfg.get(CONF_SLEEP_COOL, DEFAULT_SLEEP_COOL)): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_SLEEP_HEAT, default=cfg.get(CONF_SLEEP_HEAT, DEFAULT_SLEEP_HEAT)): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_BOOST_COOL, default=cfg.get(CONF_BOOST_COOL, DEFAULT_BOOST_COOL)): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_BOOST_HEAT, default=cfg.get(CONF_BOOST_HEAT, DEFAULT_BOOST_HEAT)): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_VACATION_COOL, default=cfg.get(CONF_VACATION_COOL, DEFAULT_VACATION_COOL)): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-                vol.Required(CONF_VACATION_HEAT, default=cfg.get(CONF_VACATION_HEAT, DEFAULT_VACATION_HEAT)): vol.All(vol.Coerce(float), vol.Range(min=60, max=85)),
-            }
-        )
-        return self.async_show_form(step_id="temperatures", data_schema=schema)
+        schema = vol.Schema(_setpoint_fields({**self._options, **(user_input or {})}))
+        return self.async_show_form(step_id="temperatures", data_schema=schema, errors=errors)
 
     async def async_step_weekday_schedule(
         self, user_input: dict[str, Any] | None = None
@@ -477,6 +508,7 @@ class DynamicHvacControlOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_ERRAND_DELAY, default=cfg.get(CONF_ERRAND_DELAY, DEFAULT_ERRAND_DELAY)): vol.Coerce(int),
                 vol.Required(CONF_IMMUNITY_DURATION, default=cfg.get(CONF_IMMUNITY_DURATION, DEFAULT_IMMUNITY_DURATION)): vol.Coerce(int),
                 vol.Required(CONF_MIN_CYCLE_DURATION, default=cfg.get(CONF_MIN_CYCLE_DURATION, DEFAULT_MIN_CYCLE_DURATION)): vol.Coerce(int),
+                vol.Required(CONF_CHANGEOVER_DELAY, default=cfg.get(CONF_CHANGEOVER_DELAY, DEFAULT_CHANGEOVER_DELAY)): vol.All(vol.Coerce(int), vol.Range(min=5, max=60)),
                 vol.Required(CONF_FAN_ON_MAX_HOURS, default=cfg.get(CONF_FAN_ON_MAX_HOURS, DEFAULT_FAN_ON_MAX_HOURS)): vol.All(vol.Coerce(int), vol.Range(min=0, max=24)),
             }
         )

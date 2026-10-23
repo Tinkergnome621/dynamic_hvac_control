@@ -27,6 +27,13 @@ CONF_IMMUNITY_DURATION = "immunity_duration"
 CONF_MIN_CYCLE_DURATION = "min_cycle_duration"  # Minimum on/off time for compressor
 
 # Setpoint Presets
+# v1.1.0: Comfort/Sleep are single "target" presets; Eco/Away/Vacation are ranges
+# (the *_HEAT key is the floor, the *_COOL key is the ceiling); Boost keeps cool/heat.
+CONF_COMFORT_TARGET = "comfort_target"
+CONF_SLEEP_TARGET = "sleep_target"
+CONF_HC_LOWER_BUFFER = "heat_cool_lower_buffer"
+CONF_HC_UPPER_BUFFER = "heat_cool_upper_buffer"
+CONF_CHANGEOVER_DELAY = "changeover_delay"
 CONF_COMFORT_COOL = "comfort_cool"
 CONF_COMFORT_HEAT = "comfort_heat"
 CONF_ECO_COOL = "eco_cool"
@@ -84,6 +91,14 @@ DEFAULT_MIN_CYCLE_DURATION = 5  # minutes (compressor protection)
 DEFAULT_FAN_ON_MAX_HOURS = 4  # hours before Fan On falls back to Auto (0 = no cap)
 
 # Defaults - Temperatures
+DEFAULT_COMFORT_TARGET = 70.0
+DEFAULT_SLEEP_TARGET = 68.0
+DEFAULT_HC_LOWER_BUFFER = 3.0
+DEFAULT_HC_UPPER_BUFFER = 3.0
+MIN_HC_BUFFER = 3.0
+MAX_HC_BUFFER = 10.0
+MIN_RANGE_GAP = 3.0  # minimum floor-to-ceiling gap for range presets
+DEFAULT_CHANGEOVER_DELAY = 20  # minutes between a heat cycle and a cool cycle (either way)
 DEFAULT_COMFORT_COOL = 72.0
 DEFAULT_COMFORT_HEAT = 68.0
 DEFAULT_ECO_COOL = 76.0

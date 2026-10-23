@@ -1,10 +1,12 @@
 /**
- * Dynamic HVAC Control Card (v1.0.3)
+ * Dynamic HVAC Control Card (v1.1.0)
  * Custom Lovelace Card for Home Assistant
  * Designed for Central A/C and Heat Pump Dual-Setpoint Range Systems
  * 
  * Features:
  * - 180° rainbow dial with draggable Heat / Cool knobs (stop at the minimum gap) and emerald deadband
+ * - v1.1.0 Anchor & Deadzone Band: in Heat/Cool on a target preset, a white target knob drags the
+ *   target and the deadband travels with it; Heat/Cool knobs set the buffers; −/+ beside "Target"
  * - Single-knob drag operation in Cool-only and Heat-only modes
  * - Icon-only HVAC status indicator (Green thermometer for Idle, Red flame for Heat, Blue snowflake for Cool)
  * - Vertical duct plenum probe stack on the left (Auto-hides if no plenum sensors are present)
@@ -20,7 +22,11 @@ class DynamicHvacControlCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._dragging = null; // 'low' | 'high' | 'single'
+    this._dragging = null; // 'low' | 'high' | 'single' | 'target'
+    this._tempTarget = 70;
+    this._pendingTarget = null;
+    this._pendingTimer = null;
+    this._dragStart = null;
     this._tempLow = 64;
     this._tempHigh = 74;
     this._tempSingle = 70;
@@ -325,6 +331,37 @@ class DynamicHvacControlCard extends HTMLElement {
           justify-content: center;
           margin: 3px 0;
         }
+        .target-adjust {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          margin-top: 2px;
+          pointer-events: auto;
+          font-size: 0.8rem;
+          color: var(--secondary-text-color, #94a3b8);
+        }
+        .target-adjust strong {
+          color: var(--primary-text-color, #ffffff);
+          font-weight: 700;
+        }
+        .target-step {
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          border: 1px solid rgba(148, 163, 184, 0.45);
+          background: transparent;
+          color: var(--primary-text-color, #ffffff);
+          font-size: 0.95rem;
+          line-height: 1;
+          padding: 0;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .target-step:hover { border-color: #34d399; color: #34d399; }
+        .target-step:active { transform: scale(0.92); }
         .temp-unit {
           font-size: 1.35rem;
           font-weight: 400;
@@ -603,6 +640,12 @@ class DynamicHvacControlCard extends HTMLElement {
                 <circle r="4.5" fill="#ffffff" />
               </g>
 
+              <!-- Target Knob (White, Heat/Cool target presets): drags the target, deadband follows -->
+              <g class="dial-knob" id="knob-target" filter="url(#shadow-knob)" style="display: none;">
+                <circle r="10" fill="#141721" stroke="#f8fafc" stroke-width="3" />
+                <circle r="3.5" fill="#34d399" />
+              </g>
+
               <!-- Single Setpoint Knob (Used for Cool-only or Heat-only) -->
               <g class="dial-knob" id="knob-single" filter="url(#shadow-knob)" style="display: none;">
                 <circle id="knob-single-outer" r="14" fill="#141721" stroke="#0ea5e9" stroke-width="3.5" />
@@ -623,6 +666,13 @@ class DynamicHvacControlCard extends HTMLElement {
               <div class="temp-display">
                 <span id="current-temp-val">—</span>
                 <span class="temp-unit">°F</span>
+              </div>
+
+              <!-- Target −/+ (Heat/Cool target presets and single modes) -->
+              <div class="target-adjust" id="target-adjust" style="display: none;">
+                <button class="target-step" id="btn-target-minus" title="Lower target 1°" aria-label="Lower target">−</button>
+                <span id="target-adjust-label">Target <strong>—</strong></span>
+                <button class="target-step" id="btn-target-plus" title="Raise target 1°" aria-label="Raise target">+</button>
               </div>
 
             </div>
@@ -699,7 +749,7 @@ class DynamicHvacControlCard extends HTMLElement {
           <button class="btn-preset" id="btn-preset-none" data-preset="none">Hold</button>
         </div>
 
-        <div class="version-footer" id="version-footer">v1.0.3 · local push</div>
+        <div class="version-footer" id="version-footer">v1.1.0 · local push</div>
       </ha-card>
     `;
 
@@ -814,11 +864,40 @@ class DynamicHvacControlCard extends HTMLElement {
     const hvacMode = stateObj.state || 'off';
     const isHeatCool = hvacMode === 'heat_cool';
 
-    // Only sync setpoints from attributes if user is not currently dragging knobs
-    if (!this._dragging) {
+    // Band model (v1.1.0): 'target' = one temperature + deadband, 'range' = floor/ceiling drift
+    const bandType = attrs.band_type === 'target' ? 'target' : 'range';
+    const isTargetBand = isHeatCool && bandType === 'target';
+    this._bandType = bandType;
+
+    // Only sync setpoints from attributes if user is not currently dragging knobs or stepping −/+
+    if (!this._dragging && this._pendingTarget === null) {
       this._tempLow = attrs.target_temp_low !== undefined ? attrs.target_temp_low : (attrs.target_temperature_low || 64);
       this._tempHigh = attrs.target_temp_high !== undefined ? attrs.target_temp_high : (attrs.target_temperature_high || 74);
       this._tempSingle = attrs.temperature !== undefined ? attrs.temperature : (isHeatCool ? 70 : (hvacMode === 'heat' ? this._tempLow : this._tempHigh));
+      this._tempTarget = typeof attrs.temperature === 'number' ? attrs.temperature : (this._tempLow + this._tempHigh) / 2;
+    }
+
+    // Target knob + −/+ row
+    const knobTarget = root.getElementById('knob-target');
+    if (knobTarget) {
+      if (isTargetBand) {
+        const posT = this._polarToCartesian(this._cx, this._cy, this._radius, this._tempToAngle(this._tempTarget));
+        knobTarget.setAttribute('transform', `translate(${posT.x}, ${posT.y})`);
+        knobTarget.style.display = 'block';
+      } else {
+        knobTarget.style.display = 'none';
+      }
+    }
+    const adjustRow = root.getElementById('target-adjust');
+    const adjustLabel = root.getElementById('target-adjust-label');
+    if (adjustRow && adjustLabel) {
+      if (isTargetBand || hvacMode === 'cool' || hvacMode === 'heat') {
+        const shown = isTargetBand ? this._tempTarget : this._tempSingle;
+        adjustLabel.innerHTML = `Target <strong>${Number(shown).toFixed(Number.isInteger(Number(shown)) ? 0 : 1)}°</strong>`;
+        adjustRow.style.display = 'flex';
+      } else {
+        adjustRow.style.display = 'none';
+      }
     }
 
     // Update Arc paths and Knob Positions
@@ -1002,8 +1081,8 @@ class DynamicHvacControlCard extends HTMLElement {
         const isHeating = hvacAction === 'heating';
 
         // Delta-T Optimal Check: Mode and Blower aware!
-        const isOptimalCool = isCooling && isFanOn && absDelta >= 14.0 && absDelta <= 20.0;
-        const isOptimalHeat = isHeating && isFanOn && absDelta >= 20.0 && absDelta <= 45.0;
+        const isOptimalCool = isCooling && blowerRunning && absDelta >= 14.0 && absDelta <= 20.0;
+        const isOptimalHeat = isHeating && blowerRunning && absDelta >= 20.0 && absDelta <= 45.0;
         const isOptimal = isOptimalCool || isOptimalHeat;
 
         const dirStr = deltaT < 0 ? 'Drop' : 'Rise';
@@ -1031,6 +1110,8 @@ class DynamicHvacControlCard extends HTMLElement {
 
     if (viewHeatCool && viewSingle && viewOff) {
       if (isHeatCool) {
+        const rangeTitle = viewHeatCool.querySelector('span');
+        if (rangeTitle) rangeTitle.textContent = isTargetBand ? 'Deadband:' : 'Drift Range:';
         if (heatLabel) heatLabel.textContent = `${this._tempLow.toFixed(0)}°F (Heat)`;
         if (coolLabel) coolLabel.textContent = `${this._tempHigh.toFixed(0)}°F (Cool)`;
         viewHeatCool.style.display = 'flex';
@@ -1151,22 +1232,38 @@ class DynamicHvacControlCard extends HTMLElement {
     if (knobSingle) {
       knobSingle.addEventListener('pointerdown', (e) => this._startDrag('single', e));
     }
+    const knobTarget = root.getElementById('knob-target');
+    if (knobTarget) {
+      knobTarget.addEventListener('pointerdown', (e) => this._startDrag('target', e));
+    }
+    const minus = root.getElementById('btn-target-minus');
+    const plus = root.getElementById('btn-target-plus');
+    if (minus) minus.addEventListener('click', (e) => { e.stopPropagation(); this._stepTarget(-1); });
+    if (plus) plus.addEventListener('click', (e) => { e.stopPropagation(); this._stepTarget(1); });
 
     window.addEventListener('pointermove', (e) => this._onDrag(e));
     window.addEventListener('pointerup', () => this._endDrag());
   }
 
-  _getMinGap() {
-    if (!this._hass || !this._config.entity) return 3.0;
+  _attrs() {
+    if (!this._hass || !this._config.entity) return {};
     const stateObj = this._hass.states[this._config.entity];
-    const attrs = stateObj ? stateObj.attributes || {} : {};
-    const cSwing = typeof attrs.cooling_swing === 'number' ? attrs.cooling_swing : 2.0;
-    const hSwing = typeof attrs.heating_swing === 'number' ? attrs.heating_swing : 1.0;
-    return Math.max(3.0, cSwing + hSwing);
+    return stateObj ? stateObj.attributes || {} : {};
+  }
+
+  _minBuffer() {
+    const a = this._attrs();
+    return typeof a.min_deadband_buffer === 'number' ? a.min_deadband_buffer : 3.0;
+  }
+
+  _getMinGap() {
+    const a = this._attrs();
+    return typeof a.min_range_gap === 'number' ? a.min_range_gap : 3.0;
   }
 
   _startDrag(target, event) {
     this._dragging = target;
+    this._dragStart = { target: this._tempTarget, low: this._tempLow, high: this._tempHigh };
     event.preventDefault();
   }
 
@@ -1186,14 +1283,33 @@ class DynamicHvacControlCard extends HTMLElement {
     const temp = this._angleToTemp(deg);
     const minT = this._config.min_temp || 60;
     const maxT = this._config.max_temp || 85;
+    const isTargetBand = this._bandType === 'target';
+    const minBuf = this._minBuffer();
+    const maxBuf = 10.0;
 
-    const minGap = this._getMinGap();
-    if (this._dragging === 'low') {
-      const newLow = Math.min(temp, this._tempHigh - minGap);
-      this._tempLow = Math.max(minT, newLow);
+    if (this._dragging === 'target') {
+      // Move the target; the deadband travels with it at the same buffer distance
+      const lowerBuf = this._dragStart.target - this._dragStart.low;
+      const upperBuf = this._dragStart.high - this._dragStart.target;
+      const t = Math.max(minT + lowerBuf, Math.min(maxT - upperBuf, temp));
+      this._tempTarget = t;
+      this._tempLow = t - lowerBuf;
+      this._tempHigh = t + upperBuf;
+    } else if (this._dragging === 'low') {
+      if (isTargetBand) {
+        // Orange knob sets the lower buffer: stops 3° below the target, at most 10°
+        this._tempLow = Math.max(this._tempTarget - maxBuf, Math.min(this._tempTarget - minBuf, temp), minT);
+      } else {
+        const newLow = Math.min(temp, this._tempHigh - this._getMinGap());
+        this._tempLow = Math.max(minT, newLow);
+      }
     } else if (this._dragging === 'high') {
-      const newHigh = Math.max(temp, this._tempLow + minGap);
-      this._tempHigh = Math.min(maxT, newHigh);
+      if (isTargetBand) {
+        this._tempHigh = Math.min(this._tempTarget + maxBuf, Math.max(this._tempTarget + minBuf, temp), maxT);
+      } else {
+        const newHigh = Math.max(temp, this._tempLow + this._getMinGap());
+        this._tempHigh = Math.min(maxT, newHigh);
+      }
     } else if (this._dragging === 'single') {
       this._tempSingle = Math.max(minT, Math.min(maxT, temp));
     }
@@ -1205,16 +1321,53 @@ class DynamicHvacControlCard extends HTMLElement {
 
   _endDrag() {
     if (!this._dragging) return;
+    const which = this._dragging;
     this._dragging = null;
-    this._commitTemperature();
+    this._commitTemperature(which);
   }
 
-  _commitTemperature() {
+  _stepTarget(delta) {
+    if (!this._hass || !this._config.entity) return;
+    const stateObj = this._hass.states[this._config.entity];
+    if (!stateObj) return;
+    const minT = this._config.min_temp || 60;
+    const maxT = this._config.max_temp || 85;
+    if (stateObj.state === 'heat_cool') {
+      const lowerBuf = this._tempTarget - this._tempLow;
+      const upperBuf = this._tempHigh - this._tempTarget;
+      const t = Math.max(minT + lowerBuf, Math.min(maxT - upperBuf, this._tempTarget + delta));
+      this._tempTarget = t;
+      this._tempLow = t - lowerBuf;
+      this._tempHigh = t + upperBuf;
+    } else {
+      this._tempSingle = Math.max(minT, Math.min(maxT, this._tempSingle + delta));
+    }
+    // Debounce: several quick taps send one service call
+    this._pendingTarget = stateObj.state === 'heat_cool' ? this._tempTarget : this._tempSingle;
+    this._updateCard(stateObj);
+    clearTimeout(this._pendingTimer);
+    this._pendingTimer = setTimeout(() => {
+      const value = this._pendingTarget;
+      this._pendingTarget = null;
+      this._hass.callService("climate", "set_temperature", {
+        entity_id: this._config.entity,
+        temperature: value
+      });
+    }, 700);
+  }
+
+  _commitTemperature(which) {
     if (!this._hass || !this._config.entity) return;
     const stateObj = this._hass.states[this._config.entity];
     const isHeatCool = stateObj && stateObj.state === 'heat_cool';
 
-    if (isHeatCool) {
+    if (isHeatCool && which === 'target') {
+      // Backend keeps the buffers, so the deadband follows the new target
+      this._hass.callService("climate", "set_temperature", {
+        entity_id: this._config.entity,
+        temperature: this._tempTarget
+      });
+    } else if (isHeatCool) {
       this._hass.callService("climate", "set_temperature", {
         entity_id: this._config.entity,
         target_temp_low: this._tempLow,
@@ -1293,7 +1446,7 @@ window.customCards.push({
 });
 
 console.info(
-  "%c DYNAMIC-HVAC-CONTROL-CARD %c v1.0.3 ",
+  "%c DYNAMIC-HVAC-CONTROL-CARD %c v1.1.0 ",
   "color: white; background: #0284c7; font-weight: 700; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #0f172a; font-weight: 700; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );

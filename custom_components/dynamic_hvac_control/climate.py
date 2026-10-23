@@ -48,6 +48,19 @@ from homeassistant.helpers.start import async_at_started
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_CHANGEOVER_DELAY,
+    CONF_COMFORT_TARGET,
+    CONF_HC_LOWER_BUFFER,
+    CONF_HC_UPPER_BUFFER,
+    CONF_SLEEP_TARGET,
+    DEFAULT_CHANGEOVER_DELAY,
+    DEFAULT_COMFORT_TARGET,
+    DEFAULT_HC_LOWER_BUFFER,
+    DEFAULT_HC_UPPER_BUFFER,
+    DEFAULT_SLEEP_TARGET,
+    MAX_HC_BUFFER,
+    MIN_HC_BUFFER,
+    MIN_RANGE_GAP,
     CONF_FAN_ON_MAX_HOURS,
     DEFAULT_FAN_ON_MAX_HOURS,
     CONF_AWAY_COOL,
@@ -159,6 +172,17 @@ SUPPORTED_PRESETS = [
     PRESET_VACATION,
 ]
 
+# v1.1.0 Anchor & Deadzone Band
+TARGET_PRESETS = (PRESET_COMFORT, PRESET_SLEEP)  # one temperature + deadband
+RANGE_PRESETS = (PRESET_ECO, PRESET_AWAY, PRESET_VACATION)  # floor (heat) + ceiling (cool)
+BAND_TARGET = "target"
+BAND_RANGE = "range"
+
+
+def _clamp(value: float, low: float = 60.0, high: float = 85.0) -> float:
+    """Clamp a temperature into the 60-85°F residential window, rounded to 0.1°F."""
+    return round(max(low, min(high, float(value))), 1)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -227,25 +251,37 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
         self._immunity_duration = int(cfg.get(CONF_IMMUNITY_DURATION, DEFAULT_IMMUNITY_DURATION))
         self._min_cycle_duration = int(cfg.get(CONF_MIN_CYCLE_DURATION, DEFAULT_MIN_CYCLE_DURATION))
 
-        # Temperature Presets
-        self._preset_targets = {
-            HVACMode.COOL: {
-                PRESET_COMFORT: float(cfg.get(CONF_COMFORT_COOL, DEFAULT_COMFORT_COOL)),
-                PRESET_ECO: float(cfg.get(CONF_ECO_COOL, DEFAULT_ECO_COOL)),
-                PRESET_AWAY: float(cfg.get(CONF_AWAY_COOL, DEFAULT_AWAY_COOL)),
-                PRESET_SLEEP: float(cfg.get(CONF_SLEEP_COOL, DEFAULT_SLEEP_COOL)),
-                PRESET_BOOST: float(cfg.get(CONF_BOOST_COOL, DEFAULT_BOOST_COOL)),
-                PRESET_VACATION: float(cfg.get(CONF_VACATION_COOL, DEFAULT_VACATION_COOL)),
-            },
-            HVACMode.HEAT: {
-                PRESET_COMFORT: float(cfg.get(CONF_COMFORT_HEAT, DEFAULT_COMFORT_HEAT)),
-                PRESET_ECO: float(cfg.get(CONF_ECO_HEAT, DEFAULT_ECO_HEAT)),
-                PRESET_AWAY: float(cfg.get(CONF_AWAY_HEAT, DEFAULT_AWAY_HEAT)),
-                PRESET_SLEEP: float(cfg.get(CONF_SLEEP_HEAT, DEFAULT_SLEEP_HEAT)),
-                PRESET_BOOST: float(cfg.get(CONF_BOOST_HEAT, DEFAULT_BOOST_HEAT)),
-                PRESET_VACATION: float(cfg.get(CONF_VACATION_HEAT, DEFAULT_VACATION_HEAT)),
-            },
+        # Temperature Presets (v1.1.0)
+        # Target presets: one temperature. Range presets: (floor, ceiling). Boost: separate heat/cool.
+        self._target_presets: dict[str, float] = {
+            PRESET_COMFORT: _clamp(cfg.get(CONF_COMFORT_TARGET, DEFAULT_COMFORT_TARGET)),
+            PRESET_SLEEP: _clamp(cfg.get(CONF_SLEEP_TARGET, DEFAULT_SLEEP_TARGET)),
         }
+        self._range_presets: dict[str, tuple[float, float]] = {}
+        for preset, heat_key, heat_def, cool_key, cool_def in (
+            (PRESET_ECO, CONF_ECO_HEAT, DEFAULT_ECO_HEAT, CONF_ECO_COOL, DEFAULT_ECO_COOL),
+            (PRESET_AWAY, CONF_AWAY_HEAT, DEFAULT_AWAY_HEAT, CONF_AWAY_COOL, DEFAULT_AWAY_COOL),
+            (PRESET_VACATION, CONF_VACATION_HEAT, DEFAULT_VACATION_HEAT, CONF_VACATION_COOL, DEFAULT_VACATION_COOL),
+        ):
+            self._range_presets[preset] = self._safe_range(
+                float(cfg.get(heat_key, heat_def)), float(cfg.get(cool_key, cool_def))
+            )
+        self._boost_cool: float = _clamp(cfg.get(CONF_BOOST_COOL, DEFAULT_BOOST_COOL))
+        self._boost_heat: float = _clamp(cfg.get(CONF_BOOST_HEAT, DEFAULT_BOOST_HEAT))
+
+        # Heat/Cool deadband buffers (settings value; the card knobs adjust the live value)
+        self._cfg_lower_buffer: float = self._safe_buffer(cfg.get(CONF_HC_LOWER_BUFFER, DEFAULT_HC_LOWER_BUFFER))
+        self._cfg_upper_buffer: float = self._safe_buffer(cfg.get(CONF_HC_UPPER_BUFFER, DEFAULT_HC_UPPER_BUFFER))
+        self._hc_lower_buffer: float = self._cfg_lower_buffer
+        self._hc_upper_buffer: float = self._cfg_upper_buffer
+        self._changeover_delay: int = int(cfg.get(CONF_CHANGEOVER_DELAY, DEFAULT_CHANGEOVER_DELAY))
+
+        # Manual hold (preset "none") remembers what kind of setpoint the user chose
+        self._hold_band: str = BAND_TARGET
+        self._hold_target: float = self._target_presets[PRESET_COMFORT]
+        self._hold_floor: float = self._range_presets[PRESET_ECO][0]
+        self._hold_ceiling: float = self._range_presets[PRESET_ECO][1]
+        self._band_type: str = BAND_TARGET
 
         # 4-Slot Weekday (Mon - Fri) Schedules
         self._wd_slots = [
@@ -279,9 +315,9 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
         self._last_conditioning_direction: str = (
             HVACMode.HEAT if dt_util.now().month in (10, 11, 12, 1, 2, 3, 4) else HVACMode.COOL
         )
-        self._target_temperature: float = self._preset_targets[HVACMode.COOL][PRESET_COMFORT]
-        self._target_temperature_low: float = self._preset_targets[HVACMode.HEAT][PRESET_COMFORT]
-        self._target_temperature_high: float = self._preset_targets[HVACMode.COOL][PRESET_COMFORT]
+        self._target_temperature: float = self._target_presets[PRESET_COMFORT]
+        self._target_temperature_low: float = self._target_temperature - self._hc_lower_buffer
+        self._target_temperature_high: float = self._target_temperature + self._hc_upper_buffer
         self._preset_mode: str = PRESET_COMFORT
         self._current_temperature: float | None = None
         self._active_sensor_source: str = "remote"  # "remote", "fallback_physical", or "emergency"
@@ -547,6 +583,27 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
             "delta_t": delta_t,
             "target_temp_low": self.target_temperature_low,
             "target_temp_high": self.target_temperature_high,
+            "band_type": self._band_type,
+            "heat_start_temp": (
+                self._hc_thresholds()[2] if self._hvac_mode == HVACMode.HEAT_COOL
+                else round(self._target_temperature - self._heating_swing, 1) if self._hvac_mode == HVACMode.HEAT
+                else None
+            ),
+            "cool_start_temp": (
+                self._hc_thresholds()[0] if self._hvac_mode == HVACMode.HEAT_COOL
+                else round(self._target_temperature + self._cooling_swing, 1) if self._hvac_mode == HVACMode.COOL
+                else None
+            ),
+            "deadband_lower_buffer": self._hc_lower_buffer,
+            "deadband_upper_buffer": self._hc_upper_buffer,
+            "deadband_buffer_settings": [self._cfg_lower_buffer, self._cfg_upper_buffer],
+            "min_deadband_buffer": MIN_HC_BUFFER,
+            "min_range_gap": MIN_RANGE_GAP,
+            "changeover_delay_minutes": self._changeover_delay,
+            "hold_band": self._hold_band,
+            "hold_target": self._hold_target,
+            "hold_floor": self._hold_floor,
+            "hold_ceiling": self._hold_ceiling,
             "schedule_enabled": self._enable_schedule,
             "last_schedule_slot": self._last_scheduled_slot,
             "vacation_mode": self._preset_mode == PRESET_VACATION,
@@ -566,6 +623,112 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
             "fan_revert_reason": self._fan_revert_reason,
             "fan_on_max_hours": self._fan_on_max_hours,
         }
+
+    # --------------------------------------------------------------------------
+    # Anchor & Deadzone Band (v1.1.0) setpoint model
+    # --------------------------------------------------------------------------
+
+    @staticmethod
+    def _safe_buffer(value: Any) -> float:
+        """Heat/Cool buffer: 3-10°F."""
+        try:
+            val = float(value)
+        except (TypeError, ValueError):
+            val = DEFAULT_HC_LOWER_BUFFER
+        return round(max(MIN_HC_BUFFER, min(MAX_HC_BUFFER, val)), 1)
+
+    @staticmethod
+    def _safe_range(floor: float, ceiling: float) -> tuple[float, float]:
+        """Floor/ceiling inside 60-85°F with at least MIN_RANGE_GAP between them."""
+        floor = _clamp(floor, 60.0, 85.0 - MIN_RANGE_GAP)
+        ceiling = _clamp(ceiling, 60.0 + MIN_RANGE_GAP, 85.0)
+        if ceiling - floor < MIN_RANGE_GAP:
+            ceiling = _clamp(floor + MIN_RANGE_GAP)
+        return floor, ceiling
+
+    def _boost_heats(self) -> bool:
+        """In Heat/Cool, decide which way Boost pushes (last direction, else season/room)."""
+        if self._last_conditioning_direction == HVACMode.HEAT:
+            return True
+        if self._last_conditioning_direction == HVACMode.COOL:
+            return False
+        if self._current_temperature is not None:
+            return self._current_temperature < 70.0
+        return dt_util.now().month in (10, 11, 12, 1, 2, 3, 4)
+
+    def _resolve_band(self) -> tuple[str, float | None, float | None, float | None]:
+        """Return (band, target, floor, ceiling) for the active preset or manual hold."""
+        preset = self._preset_mode
+        if preset in self._target_presets:
+            return BAND_TARGET, self._target_presets[preset], None, None
+        if preset in self._range_presets:
+            floor, ceiling = self._range_presets[preset]
+            return BAND_RANGE, None, floor, ceiling
+        if preset == PRESET_BOOST:
+            return "boost", None, self._boost_heat, self._boost_cool
+        if self._hold_band == BAND_RANGE:
+            return BAND_RANGE, None, self._hold_floor, self._hold_ceiling
+        return BAND_TARGET, self._hold_target, None, None
+
+    @callback
+    def _apply_setpoints(self) -> None:
+        """Recompute target / heat start (low) / cool start (high) from preset, hold and mode."""
+        band, target, floor, ceiling = self._resolve_band()
+        mode = self._hvac_mode if self._hvac_mode != HVACMode.OFF else self._last_active_hvac_mode
+        lower, upper = self._hc_lower_buffer, self._hc_upper_buffer
+
+        if band == "boost":
+            if mode == HVACMode.HEAT_COOL:
+                # Boost pushes one way only; the other side sits a full deadband away
+                if self._boost_heats():
+                    floor = self._boost_heat
+                    ceiling = self._boost_heat + lower + upper
+                else:
+                    ceiling = self._boost_cool
+                    floor = self._boost_cool - lower - upper
+                floor, ceiling = self._safe_range(floor, ceiling)
+            band = BAND_RANGE
+
+        self._band_type = band
+        if band == BAND_TARGET:
+            target = _clamp(target, 60.0 + lower, 85.0 - upper) if mode == HVACMode.HEAT_COOL else _clamp(target)
+            self._target_temperature = target
+            self._target_temperature_low = _clamp(target - lower)
+            self._target_temperature_high = _clamp(target + upper)
+        else:
+            floor, ceiling = self._safe_range(floor, ceiling)
+            self._target_temperature_low = floor
+            self._target_temperature_high = ceiling
+            if self._preset_mode == PRESET_BOOST and mode == HVACMode.COOL:
+                self._target_temperature = _clamp(self._boost_cool)
+            elif self._preset_mode == PRESET_BOOST and mode == HVACMode.HEAT:
+                self._target_temperature = _clamp(self._boost_heat)
+            elif mode == HVACMode.COOL:
+                self._target_temperature = ceiling
+            elif mode == HVACMode.HEAT:
+                self._target_temperature = floor
+            else:
+                self._target_temperature = round((floor + ceiling) / 2.0 * 2) / 2.0
+
+    def _hc_thresholds(self) -> tuple[float, float, float, float]:
+        """Heat/Cool (cool_start, cool_stop, heat_start, heat_stop)."""
+        low, high = self._target_temperature_low, self._target_temperature_high
+        if self._band_type == BAND_TARGET:
+            # Anchor: start at the edge of the deadband, run all the way back to the target
+            return high, self._target_temperature, low, self._target_temperature
+        # Range: drift freely; behave like Cool at the ceiling and Heat at the floor
+        return high + self._cooling_swing, high, low - self._heating_swing, low
+
+    def _setpoint_summary(self) -> str:
+        """Human-readable setpoints for notifications, e.g. 'Target: 71.0°F · Deadband: 68°F–74°F'."""
+        if self._hvac_mode == HVACMode.HEAT_COOL:
+            if self._band_type == BAND_TARGET:
+                return (
+                    f"Target: {self._target_temperature:.1f}°F · Deadband: "
+                    f"{self._target_temperature_low:g}°F–{self._target_temperature_high:g}°F"
+                )
+            return f"Range: {self._target_temperature_low:g}°F–{self._target_temperature_high:g}°F"
+        return f"Target: {self._target_temperature:.1f}°F"
 
     # --------------------------------------------------------------------------
     # Lifecycle & Listeners
@@ -605,68 +768,61 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
             if prev_preset in SUPPORTED_PRESETS or prev_preset == PRESET_NONE:
                 self._preset_mode = prev_preset
 
-            # 2. Restore Target Temperature with SANITY CLAMP
-            prev_temp = last_state.attributes.get(ATTR_TEMPERATURE)
-            if prev_temp is not None:
-                try:
-                    val = float(prev_temp)
-                    if 60.0 <= val <= 85.0:
-                        self._target_temperature = val
-                    else:
-                        _LOGGER.warning(
-                            "[CORRUPTED SETPOINT RECOVERED] Restored target temperature %.1f°F is outside safe residential limits (60-85°F). "
-                            "Auto-recovering setpoint to safe target for preset '%s'.",
-                            val,
-                            self._preset_mode,
-                        )
-                        active_mode = self._hvac_mode if self._hvac_mode in (HVACMode.COOL, HVACMode.HEAT) else HVACMode.COOL
-                        if self._preset_mode in self._preset_targets.get(active_mode, {}):
-                            self._target_temperature = self._preset_targets[active_mode][self._preset_mode]
-                        else:
-                            self._target_temperature = self._preset_targets.get(active_mode, {}).get(PRESET_COMFORT, 72.0)
-                            self._preset_mode = PRESET_COMFORT
-                except ValueError:
-                    pass
+            attrs = last_state.attributes
 
-            # Restore Dual Setpoints for HEAT_COOL
-            prev_low = last_state.attributes.get("target_temp_low")
-            if prev_low is None:
-                prev_low = last_state.attributes.get("target_temperature_low")
-            if prev_low is not None:
+            def _valid_temp(raw: Any) -> float | None:
                 try:
-                    val_low = float(prev_low)
-                    if 60.0 <= val_low <= 85.0:
-                        self._target_temperature_low = val_low
-                except (ValueError, TypeError):
-                    pass
+                    val = float(raw)
+                except (TypeError, ValueError):
+                    return None
+                return val if 60.0 <= val <= 85.0 else None
 
-            prev_high = last_state.attributes.get("target_temp_high")
-            if prev_high is None:
-                prev_high = last_state.attributes.get("target_temperature_high")
-            if prev_high is not None:
+            # 2. Restore live deadband buffers (knob drags), unless the settings changed since
+            saved_settings = attrs.get("deadband_buffer_settings")
+            if isinstance(saved_settings, (list, tuple)) and len(saved_settings) == 2:
                 try:
-                    val_high = float(prev_high)
-                    if 60.0 <= val_high <= 85.0:
-                        self._target_temperature_high = val_high
-                except (ValueError, TypeError):
-                    pass
+                    unchanged = (
+                        float(saved_settings[0]) == self._cfg_lower_buffer
+                        and float(saved_settings[1]) == self._cfg_upper_buffer
+                    )
+                except (TypeError, ValueError):
+                    unchanged = False
+                if unchanged:
+                    if attrs.get("deadband_lower_buffer") is not None:
+                        self._hc_lower_buffer = self._safe_buffer(attrs["deadband_lower_buffer"])
+                    if attrs.get("deadband_upper_buffer") is not None:
+                        self._hc_upper_buffer = self._safe_buffer(attrs["deadband_upper_buffer"])
 
-            min_gap = max(3.0, self._cooling_swing + self._heating_swing)
-            if self._target_temperature_high - self._target_temperature_low < min_gap:
-                if self._target_temperature_low + min_gap <= 85.0:
-                    self._target_temperature_high = self._target_temperature_low + min_gap
+            # 3. Restore the manual hold. Preset setpoints are always recomputed from settings.
+            if "hold_band" in attrs:
+                # Saved by v1.1.0+
+                if attrs.get("hold_band") in (BAND_TARGET, BAND_RANGE):
+                    self._hold_band = attrs["hold_band"]
+                hold_target = _valid_temp(attrs.get("hold_target"))
+                if hold_target is not None:
+                    self._hold_target = hold_target
+                floor = _valid_temp(attrs.get("hold_floor"))
+                ceiling = _valid_temp(attrs.get("hold_ceiling"))
+                if floor is not None and ceiling is not None:
+                    self._hold_floor, self._hold_ceiling = self._safe_range(floor, ceiling)
+            elif self._preset_mode == PRESET_NONE:
+                # Saved by v1.0.x: low/high were cool/heat setpoints with swing, i.e. a range
+                prev_low = _valid_temp(attrs.get("target_temp_low", attrs.get("target_temperature_low")))
+                prev_high = _valid_temp(attrs.get("target_temp_high", attrs.get("target_temperature_high")))
+                prev_temp = _valid_temp(attrs.get(ATTR_TEMPERATURE))
+                if self._hvac_mode == HVACMode.HEAT_COOL and prev_low is not None and prev_high is not None:
+                    self._hold_band = BAND_RANGE
+                    self._hold_floor, self._hold_ceiling = self._safe_range(prev_low, prev_high)
+                elif prev_temp is not None:
+                    self._hold_band = BAND_TARGET
+                    self._hold_target = prev_temp
                 else:
-                    self._target_temperature_high = 85.0
-                    self._target_temperature_low = max(60.0, 85.0 - min_gap)
+                    _LOGGER.warning(
+                        "[CORRUPTED SETPOINT RECOVERED] No valid manual hold found in saved state; falling back to Comfort."
+                    )
+                    self._preset_mode = PRESET_COMFORT
 
-        # Final sanity check: ensure target temperature is strictly within 60.0°F - 85.0°F
-        if self._target_temperature < 60.0 or self._target_temperature > 85.0:
-            active_mode = self._hvac_mode if self._hvac_mode in (HVACMode.COOL, HVACMode.HEAT) else HVACMode.COOL
-            if self._preset_mode in self._preset_targets.get(active_mode, {}):
-                self._target_temperature = self._preset_targets[active_mode][self._preset_mode]
-            else:
-                self._target_temperature = self._preset_targets.get(active_mode, {}).get(PRESET_COMFORT, 72.0)
-                self._preset_mode = PRESET_COMFORT
+        self._apply_setpoints()
 
         _LOGGER.info(
             "[TEST LOG][RESTORE] Active state initialized: Mode=%s, Target=%.1f°F, Preset=%s",
@@ -852,40 +1008,7 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                 )
             await self._async_call_physical_off()
         else:
-            if hvac_mode == HVACMode.HEAT_COOL:
-                min_gap = max(3.0, self._cooling_swing + self._heating_swing)
-                if self._preset_mode == PRESET_BOOST:
-                    if self._last_conditioning_direction == HVACMode.HEAT:
-                        boost_heat = True
-                    elif self._last_conditioning_direction == HVACMode.COOL:
-                        boost_heat = False
-                    else:
-                        is_heat_season = dt_util.now().month in (10, 11, 12, 1, 2, 3, 4)
-                        boost_heat = is_heat_season if self._current_temperature is None else (self._current_temperature < 70.0)
-
-                    if boost_heat:
-                        self._target_temperature_low = 72.0
-                        self._target_temperature_high = max(72.0 + min_gap, 76.0)
-                        self._target_temperature = self._target_temperature_low
-                    else:
-                        self._target_temperature_high = 68.0
-                        self._target_temperature_low = min(68.0 - min_gap, 64.0)
-                        self._target_temperature = self._target_temperature_high
-                elif self._preset_mode in SUPPORTED_PRESETS:
-                    if self._preset_mode in self._preset_targets.get(HVACMode.COOL, {}):
-                        self._target_temperature_high = max(60.0, min(85.0, self._preset_targets[HVACMode.COOL][self._preset_mode]))
-                    if self._preset_mode in self._preset_targets.get(HVACMode.HEAT, {}):
-                        self._target_temperature_low = max(60.0, min(85.0, self._preset_targets[HVACMode.HEAT][self._preset_mode]))
-                    if self._target_temperature_high - self._target_temperature_low < min_gap:
-                        if self._target_temperature_low + min_gap <= 85.0:
-                            self._target_temperature_high = self._target_temperature_low + min_gap
-                        else:
-                            self._target_temperature_high = 85.0
-                            self._target_temperature_low = max(60.0, 85.0 - min_gap)
-                    self._target_temperature = self._target_temperature_high
-            elif self._preset_mode in self._preset_targets.get(hvac_mode, {}):
-                raw_target = self._preset_targets[hvac_mode][self._preset_mode]
-                self._target_temperature = max(60.0, min(85.0, raw_target))
+            self._apply_setpoints()
             await self._async_evaluate_regulation()
 
         if old_mode != hvac_mode:
@@ -901,7 +1024,13 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
         self._notify_switch()
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
-        """Set new target temperature manually."""
+        """Set the target, the Heat/Cool buffers (knob drags), or a manual range.
+
+        * `temperature`           -> manual hold on that target (any mode). In Heat/Cool the
+                                     deadband moves with it (target dot drag, -/+, voice).
+        * `target_temp_low/high`  -> in Heat/Cool on a target band: change the buffers
+                                     (persistent, preset kept). On a range band: manual range hold.
+        """
         temp = kwargs.get(ATTR_TEMPERATURE)
         temp_low = kwargs.get(ATTR_TARGET_TEMP_LOW)
         temp_high = kwargs.get(ATTR_TARGET_TEMP_HIGH)
@@ -910,44 +1039,62 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
             return
 
         old_preset = self._preset_mode
-        self._preset_mode = PRESET_NONE
-
-        min_gap = max(3.0, self._cooling_swing + self._heating_swing)
-        if temp_low is not None:
-            self._target_temperature_low = max(60.0, min(85.0 - min_gap, round(float(temp_low), 1)))
-        if temp_high is not None:
-            self._target_temperature_high = max(60.0 + min_gap, min(85.0, round(float(temp_high), 1)))
-
-        if self._target_temperature_high - self._target_temperature_low < min_gap:
-            if temp_low is not None and temp_high is None:
-                self._target_temperature_high = min(85.0, self._target_temperature_low + min_gap)
-            elif temp_high is not None and temp_low is None:
-                self._target_temperature_low = max(60.0, self._target_temperature_high - min_gap)
-            else:
-                if self._target_temperature_low + min_gap <= 85.0:
-                    self._target_temperature_high = self._target_temperature_low + min_gap
-                else:
-                    self._target_temperature_high = 85.0
-                    self._target_temperature_low = max(60.0, 85.0 - min_gap)
 
         if temp is not None:
-            new_temp = max(60.0, min(85.0, round(float(temp), 1)))
+            new_temp = _clamp(temp)
             old_temp = self._target_temperature
-            self._target_temperature = new_temp
+            self._hold_band = BAND_TARGET
+            self._hold_target = new_temp
+            self._preset_mode = PRESET_NONE
             _LOGGER.info(
                 "[TEST LOG][STATE CHANGE] Target temperature changed from %.1f°F to %.1f°F (Preset '%s' cleared to NONE). Reason: Manual user adjustment via UI or service call.",
                 old_temp,
                 new_temp,
                 old_preset.upper(),
             )
-        else:
-            _LOGGER.info(
-                "[TEST LOG][STATE CHANGE] Target temperature range changed to %.1f°F - %.1f°F (Preset '%s' cleared to NONE). Reason: Manual range adjustment via UI or service call.",
-                self._target_temperature_low,
-                self._target_temperature_high,
-                old_preset.upper(),
-            )
 
+        if (temp_low is not None or temp_high is not None) and self._hvac_mode == HVACMode.HEAT_COOL:
+            if self._band_type == BAND_TARGET or temp is not None:
+                anchor = self._hold_target if temp is not None else self._target_temperature
+                if temp_low is not None:
+                    self._hc_lower_buffer = self._safe_buffer(anchor - float(temp_low))
+                if temp_high is not None:
+                    self._hc_upper_buffer = self._safe_buffer(float(temp_high) - anchor)
+                _LOGGER.info(
+                    "[TEST LOG][STATE CHANGE] Heat/Cool buffers changed to -%.1f°F / +%.1f°F around %.1f°F (Preset '%s' kept). Reason: Deadband knob adjustment via UI or service call.",
+                    self._hc_lower_buffer,
+                    self._hc_upper_buffer,
+                    anchor,
+                    self._preset_mode.upper(),
+                )
+            else:
+                floor = _clamp(temp_low) if temp_low is not None else self._target_temperature_low
+                ceiling = _clamp(temp_high) if temp_high is not None else self._target_temperature_high
+                if ceiling - floor < MIN_RANGE_GAP:
+                    # The knob that moved stops at the gap; it never pushes the other one
+                    if temp_low is not None and temp_high is None:
+                        floor = ceiling - MIN_RANGE_GAP
+                    else:
+                        ceiling = floor + MIN_RANGE_GAP
+                self._hold_floor, self._hold_ceiling = self._safe_range(floor, ceiling)
+                self._hold_band = BAND_RANGE
+                self._preset_mode = PRESET_NONE
+                _LOGGER.info(
+                    "[TEST LOG][STATE CHANGE] Manual range set to heat below %.1f°F / cool above %.1f°F (Preset '%s' cleared to NONE). Reason: Range knob adjustment via UI or service call.",
+                    self._hold_floor,
+                    self._hold_ceiling,
+                    old_preset.upper(),
+                )
+        elif temp is None:
+            # Range-only call outside Heat/Cool: use the side that matches the mode
+            side = temp_high if self._hvac_mode == HVACMode.COOL else temp_low
+            if side is None:
+                side = temp_low if temp_low is not None else temp_high
+            self._hold_band = BAND_TARGET
+            self._hold_target = _clamp(side)
+            self._preset_mode = PRESET_NONE
+
+        self._apply_setpoints()
         await self._async_evaluate_regulation()
         self.async_write_ha_state()
         self._notify_switch()
@@ -983,49 +1130,8 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                 self._errand_timer_cancel = None
                 self._errand_timer_end = None
 
-        # Update setpoints from preset targets with HEAT_COOL gap safety
-        min_gap = max(3.0, self._cooling_swing + self._heating_swing)
-        if preset_mode == PRESET_BOOST and self._hvac_mode == HVACMode.HEAT_COOL:
-            # Define Boost in HEAT_COOL: prioritize current demand, last conditioning direction, or season
-            if self._last_conditioning_direction == HVACMode.HEAT:
-                boost_heat = True
-            elif self._last_conditioning_direction == HVACMode.COOL:
-                boost_heat = False
-            else:
-                is_heat_season = dt_util.now().month in (10, 11, 12, 1, 2, 3, 4)
-                boost_heat = is_heat_season if self._current_temperature is None else (self._current_temperature < 70.0)
-
-            if boost_heat:
-                self._target_temperature_low = 72.0
-                self._target_temperature_high = max(72.0 + min_gap, 76.0)
-                self._target_temperature = self._target_temperature_low
-            else:
-                self._target_temperature_high = 68.0
-                self._target_temperature_low = min(68.0 - min_gap, 64.0)
-                self._target_temperature = self._target_temperature_high
-        else:
-            if preset_mode in self._preset_targets.get(HVACMode.COOL, {}):
-                self._target_temperature_high = max(60.0, min(85.0, self._preset_targets[HVACMode.COOL][preset_mode]))
-            if preset_mode in self._preset_targets.get(HVACMode.HEAT, {}):
-                self._target_temperature_low = max(60.0, min(85.0, self._preset_targets[HVACMode.HEAT][preset_mode]))
-
-            if self._target_temperature_high - self._target_temperature_low < min_gap:
-                if self._target_temperature_low + min_gap <= 85.0:
-                    self._target_temperature_high = self._target_temperature_low + min_gap
-                else:
-                    self._target_temperature_high = 85.0
-                    self._target_temperature_low = max(60.0, 85.0 - min_gap)
-
-            if self._hvac_mode == HVACMode.COOL:
-                if preset_mode in self._preset_targets[HVACMode.COOL]:
-                    raw_target = self._preset_targets[HVACMode.COOL][preset_mode]
-                    self._target_temperature = max(60.0, min(85.0, raw_target))
-            elif self._hvac_mode == HVACMode.HEAT:
-                if preset_mode in self._preset_targets[HVACMode.HEAT]:
-                    raw_target = self._preset_targets[HVACMode.HEAT][preset_mode]
-                    self._target_temperature = max(60.0, min(85.0, raw_target))
-            elif self._hvac_mode == HVACMode.HEAT_COOL:
-                self._target_temperature = self._target_temperature_high
+        # Update setpoints from the preset (target band or range)
+        self._apply_setpoints()
 
         if old_preset != preset_mode:
             _LOGGER.info(
@@ -1041,7 +1147,7 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
         await self._async_evaluate_regulation()
 
         if old_preset != preset_mode and notify and not self._is_starting_up:
-            target_str = f" (Target: {self._target_temperature}°F)" if self._target_temperature else ""
+            target_str = f" ({self._setpoint_summary()})"
             self.hass.async_create_task(
                 self._async_send_notification(
                     title="Preset Mode Changed",
@@ -1564,13 +1670,10 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
 
         # --- HEAT_COOL MODE (Dual Range Deadband Regulation) ---
         elif self._hvac_mode == HVACMode.HEAT_COOL:
-            target_low = self.target_temperature_low or 64.0
-            target_high = self.target_temperature_high or 74.0
-
-            cool_activate = target_high + self._cooling_swing
-            cool_deactivate = target_high
-            heat_activate = target_low - self._heating_swing
-            heat_deactivate = target_low
+            # Target band: start at target -/+ buffer, stop at the target.
+            # Range band: start at floor - heat swing / ceiling + cool swing, stop at floor / ceiling.
+            cool_activate, cool_deactivate, heat_activate, heat_deactivate = self._hc_thresholds()
+            changeover = timedelta(minutes=max(self._changeover_delay, self._min_cycle_duration))
 
             if self._current_temperature >= cool_activate:
                 if self._current_temperature <= 65.0:
@@ -1597,15 +1700,17 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                     self.async_write_ha_state()
                     return
 
-                if self._last_cycle_stop and (now - self._last_cycle_stop) < min_cycle:
-                    remaining = int(min_cycle.total_seconds() - (now - self._last_cycle_stop).total_seconds())
+                wait = changeover if self._last_conditioning_direction == HVACMode.HEAT else min_cycle
+                if self._last_cycle_stop and (now - self._last_cycle_stop) < wait:
+                    remaining = int(wait.total_seconds() - (now - self._last_cycle_stop).total_seconds())
                     _LOGGER.info(
-                        "[TEST LOG][CYCLE DELAY] Cooling demand active in HEAT_COOL mode, but compressor dwell active (%ds remaining).",
+                        "[TEST LOG][CYCLE DELAY] Cooling demand active in HEAT_COOL mode, but %s active (%ds remaining).",
+                        "heat-to-cool changeover wait" if wait == changeover and wait != min_cycle else "compressor dwell",
                         remaining,
                     )
                     return
 
-                physical_cool_target = max(target_high - self._cooling_offset, min_limit)
+                physical_cool_target = max(cool_deactivate - self._cooling_offset, min_limit)
                 if self._hvac_action != HVACAction.COOLING:
                     self._last_cycle_start = now
                     old_action = self._hvac_action
@@ -1641,15 +1746,17 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                     self.async_write_ha_state()
                     return
 
-                if self._last_cycle_stop and (now - self._last_cycle_stop) < min_cycle:
-                    remaining = int(min_cycle.total_seconds() - (now - self._last_cycle_stop).total_seconds())
+                wait = changeover if self._last_conditioning_direction == HVACMode.COOL else min_cycle
+                if self._last_cycle_stop and (now - self._last_cycle_stop) < wait:
+                    remaining = int(wait.total_seconds() - (now - self._last_cycle_stop).total_seconds())
                     _LOGGER.info(
-                        "[TEST LOG][CYCLE DELAY] Heating demand active in HEAT_COOL mode, but furnace dwell active (%ds remaining).",
+                        "[TEST LOG][CYCLE DELAY] Heating demand active in HEAT_COOL mode, but %s active (%ds remaining).",
+                        "cool-to-heat changeover wait" if wait == changeover and wait != min_cycle else "furnace dwell",
                         remaining,
                     )
                     return
 
-                physical_heat_target = min(target_low + self._heating_offset, max_limit)
+                physical_heat_target = min(heat_deactivate + self._heating_offset, max_limit)
                 if self._hvac_action != HVACAction.HEATING:
                     self._last_cycle_start = now
                     old_action = self._hvac_action
@@ -1776,12 +1883,13 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
             safe_target = max(60.0, min(85.0, round(target_temp, 1)))
         elif self._hvac_mode == HVACMode.HEAT_COOL:
             # In HEAT_COOL, hand off in last active conditioning direction (HEAT or COOL)
+            _c_start, cool_stop, _h_start, heat_stop = self._hc_thresholds()
             if self._last_conditioning_direction == HVACMode.HEAT:
                 desired_mode = HVACMode.HEAT
-                safe_target = max(60.0, min(85.0, round(self._target_temperature_low, 1)))
+                safe_target = _clamp(heat_stop)
             elif self._last_conditioning_direction == HVACMode.COOL:
                 desired_mode = HVACMode.COOL
-                safe_target = max(60.0, min(85.0, round(self._target_temperature_high, 1)))
+                safe_target = _clamp(cool_stop)
             else:
                 # Direction unknown: check physical wall thermostat's current temperature against midpoint
                 midpoint = (self._target_temperature_low + self._target_temperature_high) / 2.0
@@ -1798,19 +1906,19 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                 if temp_to_check is not None:
                     if temp_to_check < midpoint:
                         desired_mode = HVACMode.HEAT
-                        safe_target = max(60.0, min(85.0, round(self._target_temperature_low, 1)))
+                        safe_target = _clamp(heat_stop)
                     else:
                         desired_mode = HVACMode.COOL
-                        safe_target = max(60.0, min(85.0, round(self._target_temperature_high, 1)))
+                        safe_target = _clamp(cool_stop)
                 else:
                     # Both sensors completely dead and wall temp unknown: default to HEAT during cold months (Oct-Apr)
                     now_month = dt_util.now().month
                     if now_month in (10, 11, 12, 1, 2, 3, 4):
                         desired_mode = HVACMode.HEAT
-                        safe_target = max(60.0, min(85.0, round(self._target_temperature_low, 1)))
+                        safe_target = _clamp(heat_stop)
                     else:
                         desired_mode = HVACMode.COOL
-                        safe_target = max(60.0, min(85.0, round(self._target_temperature_high, 1)))
+                        safe_target = _clamp(cool_stop)
         else:
             desired_mode = HVACMode.OFF
             safe_target = max(60.0, min(85.0, round(target_temp, 1)))
@@ -2067,10 +2175,8 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                 )
             )
 
-            # Sync setpoint for the new season/mode from preset targets
-            if self._preset_mode in self._preset_targets.get(self._hvac_mode, {}):
-                raw_target = self._preset_targets[self._hvac_mode][self._preset_mode]
-                self._target_temperature = max(60.0, min(85.0, raw_target))
+            # Sync setpoint for the new season/mode from the preset or hold
+            self._apply_setpoints()
             self._last_sent_target_temp = self._target_temperature
 
             temp_attr = new_state.attributes.get(ATTR_TEMPERATURE)
@@ -2119,27 +2225,28 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                     new_user_target = max(60.0, min(85.0, round(new_target, 1)))
 
                     if self._hvac_mode == HVACMode.HEAT_COOL:
-                        min_gap = max(3.0, self._cooling_swing + self._heating_swing)
-                        if new_state.state == HVACMode.COOL or self._hvac_action == HVACAction.COOLING:
-                            self._target_temperature_high = new_user_target
-                            if self._target_temperature_high - self._target_temperature_low < min_gap:
-                                self._target_temperature_low = max(60.0, self._target_temperature_high - min_gap)
-                        elif new_state.state == HVACMode.HEAT or self._hvac_action == HVACAction.HEATING:
-                            self._target_temperature_low = new_user_target
-                            if self._target_temperature_high - self._target_temperature_low < min_gap:
-                                self._target_temperature_high = min(85.0, self._target_temperature_low + min_gap)
+                        if self._band_type == BAND_TARGET:
+                            # Wall dial moves the target; the deadband travels with it
+                            self._hold_band = BAND_TARGET
+                            self._hold_target = new_user_target
                         else:
-                            midpoint = (self._target_temperature_low + self._target_temperature_high) / 2.0
-                            if new_user_target >= midpoint:
-                                self._target_temperature_high = new_user_target
-                                if self._target_temperature_high - self._target_temperature_low < min_gap:
-                                    self._target_temperature_low = max(60.0, self._target_temperature_high - min_gap)
+                            floor, ceiling = self._target_temperature_low, self._target_temperature_high
+                            if new_state.state == HVACMode.COOL or self._hvac_action == HVACAction.COOLING:
+                                use_ceiling = True
+                            elif new_state.state == HVACMode.HEAT or self._hvac_action == HVACAction.HEATING:
+                                use_ceiling = False
                             else:
-                                self._target_temperature_low = new_user_target
-                                if self._target_temperature_high - self._target_temperature_low < min_gap:
-                                    self._target_temperature_high = min(85.0, self._target_temperature_low + min_gap)
-                        self._target_temperature = self._target_temperature_high
+                                use_ceiling = new_user_target >= (floor + ceiling) / 2.0
+                            if use_ceiling:
+                                ceiling = new_user_target
+                                floor = min(floor, ceiling - MIN_RANGE_GAP)
+                            else:
+                                floor = new_user_target
+                                ceiling = max(ceiling, floor + MIN_RANGE_GAP)
+                            self._hold_band = BAND_RANGE
+                            self._hold_floor, self._hold_ceiling = self._safe_range(floor, ceiling)
                         self._preset_mode = PRESET_NONE
+                        self._apply_setpoints()
                         self._physical_last_reported_target = new_target
                         self._ignore_physical_target_until = now + timedelta(seconds=15)
                         _LOGGER.info(
@@ -2160,8 +2267,10 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                             self._preset_mode.upper(),
                             new_target,
                         )
-                        self._target_temperature = new_user_target
+                        self._hold_band = BAND_TARGET
+                        self._hold_target = new_user_target
                         self._preset_mode = PRESET_NONE
+                        self._apply_setpoints()
                         self._physical_last_reported_target = new_target
                         self._ignore_physical_target_until = now + timedelta(seconds=15)
                         await self._async_evaluate_regulation()
