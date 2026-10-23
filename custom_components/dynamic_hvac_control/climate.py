@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.climate import (
+    ATTR_HVAC_MODE,
     ATTR_TARGET_TEMP_HIGH,
     ATTR_TARGET_TEMP_LOW,
     ClimateEntity,
@@ -201,6 +202,9 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
     _attr_has_entity_name = True
     _attr_name = None
     _attr_temperature_unit = UnitOfTemperature.FAHRENHEIT
+    _attr_min_temp = 60.0
+    _attr_max_temp = 85.0
+    _attr_target_temperature_step = 1.0
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.PRESET_MODE
@@ -1031,6 +1035,10 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
         * `target_temp_low/high`  -> in Heat/Cool on a target band: change the buffers
                                      (persistent, preset kept). On a range band: manual range hold.
         """
+        hvac_mode = kwargs.get(ATTR_HVAC_MODE)
+        if hvac_mode and hvac_mode in self._attr_hvac_modes and hvac_mode != self._hvac_mode:
+            await self.async_set_hvac_mode(hvac_mode)
+
         temp = kwargs.get(ATTR_TEMPERATURE)
         temp_low = kwargs.get(ATTR_TARGET_TEMP_LOW)
         temp_high = kwargs.get(ATTR_TARGET_TEMP_HIGH)
@@ -2222,13 +2230,27 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                     and abs(new_target - self._physical_last_reported_target) >= 1.0
                     and (self._last_sent_target_temp is None or abs(new_target - self._last_sent_target_temp) >= 1.0)
                 ):
-                    new_user_target = max(60.0, min(85.0, round(new_target, 1)))
+                    baseline = (
+                        self._last_sent_target_temp
+                        if self._last_sent_target_temp is not None
+                        else self._physical_last_reported_target
+                    )
+                    delta = round(new_target - baseline, 1)
 
                     if self._hvac_mode == HVACMode.HEAT_COOL:
                         if self._band_type == BAND_TARGET:
                             # Wall dial moves the target; the deadband travels with it
+                            new_user_target = _clamp(self._target_temperature + delta)
                             self._hold_band = BAND_TARGET
                             self._hold_target = new_user_target
+                            _LOGGER.info(
+                                "[TEST LOG][STATE CHANGE] Wall dial adjusted by delta %+0.1f°F (wall dial %.1f°F vs baseline %.1f°F). Target changed from %.1f°F to %.1f°F in HEAT_COOL mode.",
+                                delta,
+                                new_target,
+                                baseline,
+                                self._target_temperature,
+                                new_user_target,
+                            )
                         else:
                             floor, ceiling = self._target_temperature_low, self._target_temperature_high
                             if new_state.state == HVACMode.COOL or self._hvac_action == HVACAction.COOLING:
@@ -2236,39 +2258,23 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                             elif new_state.state == HVACMode.HEAT or self._hvac_action == HVACAction.HEATING:
                                 use_ceiling = False
                             else:
-                                use_ceiling = new_user_target >= (floor + ceiling) / 2.0
+                                use_ceiling = abs(new_target - ceiling) <= abs(new_target - floor)
                             if use_ceiling:
-                                ceiling = new_user_target
+                                ceiling = _clamp(ceiling + delta)
                                 floor = min(floor, ceiling - MIN_RANGE_GAP)
                             else:
-                                floor = new_user_target
+                                floor = _clamp(floor + delta)
                                 ceiling = max(ceiling, floor + MIN_RANGE_GAP)
                             self._hold_band = BAND_RANGE
                             self._hold_floor, self._hold_ceiling = self._safe_range(floor, ceiling)
-                        self._preset_mode = PRESET_NONE
-                        self._apply_setpoints()
-                        self._physical_last_reported_target = new_target
-                        self._ignore_physical_target_until = now + timedelta(seconds=15)
-                        _LOGGER.info(
-                            "[TEST LOG][STATE CHANGE] Target range changed to %.1f°F - %.1f°F (Preset '%s' cleared to NONE). Reason: User physically turned wall thermostat dial to %.1f°F in HEAT_COOL mode.",
-                            self._target_temperature_low,
-                            self._target_temperature_high,
-                            self._preset_mode.upper(),
-                            new_target,
-                        )
-                        await self._async_evaluate_regulation()
-                        self.async_write_ha_state()
-                        self._notify_switch()
-                    elif abs(new_user_target - self._target_temperature) >= 0.5:
-                        _LOGGER.info(
-                            "[TEST LOG][STATE CHANGE] Target temperature changed from %.1f°F to %.1f°F (Preset '%s' cleared to NONE). Reason: User physically turned wall thermostat dial to %.1f°F.",
-                            self._target_temperature,
-                            new_user_target,
-                            self._preset_mode.upper(),
-                            new_target,
-                        )
-                        self._hold_band = BAND_TARGET
-                        self._hold_target = new_user_target
+                            _LOGGER.info(
+                                "[TEST LOG][STATE CHANGE] Wall dial adjusted by delta %+0.1f°F (wall dial %.1f°F vs baseline %.1f°F). Range changed to %.1f°F - %.1f°F in HEAT_COOL mode.",
+                                delta,
+                                new_target,
+                                baseline,
+                                self._hold_floor,
+                                self._hold_ceiling,
+                            )
                         self._preset_mode = PRESET_NONE
                         self._apply_setpoints()
                         self._physical_last_reported_target = new_target
@@ -2276,6 +2282,27 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                         await self._async_evaluate_regulation()
                         self.async_write_ha_state()
                         self._notify_switch()
+                    else:
+                        new_user_target = _clamp(self._target_temperature + delta)
+                        if abs(new_user_target - self._target_temperature) >= 0.5:
+                            _LOGGER.info(
+                                "[TEST LOG][STATE CHANGE] Wall dial adjusted by delta %+0.1f°F (wall dial %.1f°F vs baseline %.1f°F). Target temperature changed from %.1f°F to %.1f°F (Preset '%s' cleared to NONE).",
+                                delta,
+                                new_target,
+                                baseline,
+                                self._target_temperature,
+                                new_user_target,
+                                self._preset_mode.upper(),
+                            )
+                            self._hold_band = BAND_TARGET
+                            self._hold_target = new_user_target
+                            self._preset_mode = PRESET_NONE
+                            self._apply_setpoints()
+                            self._physical_last_reported_target = new_target
+                            self._ignore_physical_target_until = now + timedelta(seconds=15)
+                            await self._async_evaluate_regulation()
+                            self.async_write_ha_state()
+                            self._notify_switch()
 
                 self._physical_last_reported_target = new_target
             except (ValueError, TypeError):

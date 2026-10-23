@@ -1,5 +1,5 @@
 /**
- * Dynamic HVAC Control Card (v1.1.0)
+ * Dynamic HVAC Control Card (v1.1.1)
  * Custom Lovelace Card for Home Assistant
  * Designed for Central A/C and Heat Pump Dual-Setpoint Range Systems
  * 
@@ -266,18 +266,18 @@ class DynamicHvacControlCard extends HTMLElement {
 
         /* Icon-Only Status Indicator */
         .status-icon-circle {
-          width: 32px;
-          height: 32px;
+          width: 26px;
+          height: 26px;
           border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
-          margin-bottom: 2px;
+          margin-bottom: 0;
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
         }
         .status-icon-circle svg {
-          width: 16px;
-          height: 16px;
+          width: 14px;
+          height: 14px;
         }
         .status-idle {
           background: rgba(16, 185, 129, 0.2);
@@ -749,7 +749,7 @@ class DynamicHvacControlCard extends HTMLElement {
           <button class="btn-preset" id="btn-preset-none" data-preset="none">Hold</button>
         </div>
 
-        <div class="version-footer" id="version-footer">v1.1.0 · local push</div>
+        <div class="version-footer" id="version-footer">v1.1.1 · local push</div>
       </ha-card>
     `;
 
@@ -1446,7 +1446,7 @@ window.customCards.push({
 });
 
 console.info(
-  "%c DYNAMIC-HVAC-CONTROL-CARD %c v1.1.0 ",
+  "%c DYNAMIC-HVAC-CONTROL-CARD %c v1.1.1 ",
   "color: white; background: #0284c7; font-weight: 700; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #0f172a; font-weight: 700; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
