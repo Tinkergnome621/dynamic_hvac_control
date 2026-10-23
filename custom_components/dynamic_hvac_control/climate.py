@@ -341,6 +341,7 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
         self._last_sent_target_temp: float | None = None
         self._physical_last_reported_target: float | None = None
         self._ignore_physical_target_until: datetime | None = None
+        self._ignore_mode_change_until: datetime | None = None
 
         # Safety & Cycle Timestamps
         self._last_cycle_start: datetime | None = None
@@ -1844,6 +1845,7 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                 {ATTR_ENTITY_ID: self._target_climate, "hvac_mode": HVACMode.COOL}
             )
             self._last_sent_physical_mode = HVACMode.COOL
+            self._ignore_mode_change_until = dt_util.utcnow() + timedelta(seconds=15)
 
         if cur_temp is None or abs(cur_temp - safe_target) >= 0.5 or (self._last_sent_target_temp is None or abs(self._last_sent_target_temp - safe_target) >= 0.5):
             await self._async_service(
@@ -1875,6 +1877,7 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                 {ATTR_ENTITY_ID: self._target_climate, "hvac_mode": HVACMode.HEAT}
             )
             self._last_sent_physical_mode = HVACMode.HEAT
+            self._ignore_mode_change_until = dt_util.utcnow() + timedelta(seconds=15)
 
         if cur_temp is None or abs(cur_temp - safe_target) >= 0.5 or (self._last_sent_target_temp is None or abs(self._last_sent_target_temp - safe_target) >= 0.5):
             await self._async_service(
@@ -1938,6 +1941,7 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
             {ATTR_ENTITY_ID: self._target_climate, "hvac_mode": desired_mode}
         )
         self._last_sent_physical_mode = desired_mode
+        self._ignore_mode_change_until = dt_util.utcnow() + timedelta(seconds=15)
 
         if desired_mode != HVACMode.OFF:
             await self._async_service(
@@ -1960,6 +1964,7 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                 {ATTR_ENTITY_ID: self._target_climate, "hvac_mode": HVACMode.OFF}
             )
             self._last_sent_physical_mode = HVACMode.OFF
+            self._ignore_mode_change_until = dt_util.utcnow() + timedelta(seconds=15)
 
         # When idle, only turn off the fan entity if the user hasn't explicitly set fan mode to 'on'
         if self._fan_entity and self._user_fan_mode != "on":
@@ -2206,12 +2211,17 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
         if new_state.state == HVACMode.OFF or self._hvac_mode == HVACMode.OFF:
             return
 
+        now = dt_util.utcnow()
+        # STRICT SAFETY GUARD B: Mode change suppression window (reject all dial values during mode transitions)
+        if self._ignore_mode_change_until and now < self._ignore_mode_change_until:
+            return
+
         target_temp = new_state.attributes.get(ATTR_TEMPERATURE)
         if target_temp is not None:
             try:
                 new_target = float(target_temp)
 
-                # STRICT SAFETY GUARD B: Reject frost-guard or out-of-range temperatures (<60°F or >85°F)
+                # STRICT SAFETY GUARD C: Reject frost-guard or out-of-range temperatures (<60°F or >85°F)
                 if new_target < 60.0 or new_target > 85.0:
                     _LOGGER.debug(
                         "Ignoring physical thermostat target %.1f°F outside safe residential range (60-85°F).",
@@ -2219,10 +2229,9 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                     )
                     return
 
-                # STRICT SAFETY GUARD C: Echo suppression window
+                # STRICT SAFETY GUARD D: Echo suppression window
                 # Inside the window, only ignore a reported value within 0.5°F of _last_sent_target_temp (that's our own echo).
                 # Any value >= 1.0°F away from both _last_sent_target_temp and _physical_last_reported_target is a real user press.
-                now = dt_util.utcnow()
                 if (
                     self._ignore_physical_target_until
                     and now < self._ignore_physical_target_until
@@ -2285,6 +2294,7 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                         self._preset_mode = PRESET_NONE
                         self._apply_setpoints()
                         self._physical_last_reported_target = new_target
+                        self._last_sent_target_temp = new_target
                         self._ignore_physical_target_until = now + timedelta(seconds=15)
                         await self._async_evaluate_regulation()
                         self.async_write_ha_state()
@@ -2306,6 +2316,7 @@ class DynamicHvacControlEntity(RestoreEntity, ClimateEntity):
                             self._preset_mode = PRESET_NONE
                             self._apply_setpoints()
                             self._physical_last_reported_target = new_target
+                            self._last_sent_target_temp = new_target
                             self._ignore_physical_target_until = now + timedelta(seconds=15)
                             await self._async_evaluate_regulation()
                             self.async_write_ha_state()

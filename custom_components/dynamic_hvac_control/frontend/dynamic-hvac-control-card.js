@@ -1,5 +1,5 @@
 /**
- * Dynamic HVAC Control Card (v1.1.2)
+ * Dynamic HVAC Control Card (v1.1.3)
  * Custom Lovelace Card for Home Assistant
  * Designed for Central A/C and Heat Pump Dual-Setpoint Range Systems
  * 
@@ -749,7 +749,7 @@ class DynamicHvacControlCard extends HTMLElement {
           <button class="btn-preset" id="btn-preset-none" data-preset="none">Hold</button>
         </div>
 
-        <div class="version-footer" id="version-footer">v1.1.2 · local push</div>
+        <div class="version-footer" id="version-footer">v1.1.3 · local push</div>
       </ha-card>
     `;
 
@@ -1446,7 +1446,7 @@ window.customCards.push({
 });
 
 console.info(
-  "%c DYNAMIC-HVAC-CONTROL-CARD %c v1.1.2 ",
+  "%c DYNAMIC-HVAC-CONTROL-CARD %c v1.1.3 ",
   "color: white; background: #0284c7; font-weight: 700; border-radius: 4px 0 0 4px; padding: 2px 6px;",
   "color: white; background: #0f172a; font-weight: 700; border-radius: 0 4px 4px 0; padding: 2px 6px;"
 );
